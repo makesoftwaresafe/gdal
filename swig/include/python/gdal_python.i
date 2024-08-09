@@ -3051,6 +3051,7 @@ def VectorTranslateOptions(options=None, format=None,
          simplifyTolerance=None,
          segmentizeMaxDist=None,
          makeValid=False,
+         skipInvalid=False,
          mapFieldType=None,
          explodeCollections=False,
          zField=None,
@@ -3151,6 +3152,9 @@ def VectorTranslateOptions(options=None, format=None,
         maximum distance between consecutive nodes of a line geometry
     makeValid:
         run MakeValid() on geometries
+    skipInvalid:
+        whether to skip features with invalid geometries regarding the rules of
+        the Simple Features specification.
     mapFieldType:
         converts any field of the specified type to another type. Valid types are:
         Integer, Integer64, Real, String, Date, Time, DateTime, Binary, IntegerList,
@@ -3334,6 +3338,8 @@ def VectorTranslateOptions(options=None, format=None,
             new_options += ['-segmentize', str(segmentizeMaxDist)]
         if makeValid:
             new_options += ['-makevalid']
+        if skipInvalid:
+            new_options += ['-skipinvalid']
         if mapFieldType is not None:
             new_options += ['-mapFieldType']
             if isinstance(mapFieldType, str):
@@ -4932,4 +4938,32 @@ def quiet_errors():
         tuple.max_part_size = max_part_size
         tuple.max_part_count = max_part_count
         val = tuple
+%}
+
+%feature("shadow") InterpolateAtPoint %{
+def InterpolateAtPoint(self, *args, **kwargs):
+    """Return the interpolated value at pixel and line raster coordinates.
+       See :cpp:func:`GDALRasterBand::InterpolateAtPoint`.
+
+       Parameters
+       ----------
+       pixel : float
+       line : float
+       interpolation : GRIOResampleAlg (nearest, bilinear, cubic, cubicspline)
+
+       Returns
+       -------
+       float:
+           Interpolated value, or ``None`` if it has any error.
+    """
+
+    ret = $action(self, *args, **kwargs)
+    if ret[0] != CE_None:
+        return None
+
+    from . import gdal
+    if gdal.DataTypeIsComplex(self.DataType):
+        return complex(ret[1], ret[2])
+    else:
+        return ret[1]
 %}

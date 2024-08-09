@@ -1376,6 +1376,7 @@ int OGRWFSDataSource::Open(const char *pszFilename, int bUpdateIn,
                 OGRLayer::GetSupportedSRSListRetType apoSupportedCRSList;
                 if (psOtherSRS)
                 {
+                    if (pszDefaultSRS)
                     {
                         auto poSRS =
                             std::unique_ptr<OGRSpatialReference,
@@ -1917,7 +1918,8 @@ void OGRWFSDataSource::LoadMultipleLayerDefn(const char *pszLayerName,
 
     std::vector<GMLFeatureClass *> aosClasses;
     bool bFullyUnderstood = false;
-    GMLParseXSD(osTmpFileName, aosClasses, bFullyUnderstood);
+    bool bUseSchemaImports = false;
+    GMLParseXSD(osTmpFileName, bUseSchemaImports, aosClasses, bFullyUnderstood);
 
     int nLayersFound = 0;
     if (!(int)aosClasses.empty())

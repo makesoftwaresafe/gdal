@@ -304,16 +304,13 @@ inline bool OGRArrowLayer::MapArrowTypeToOGR(
     }
     else if (const auto &field_kv_metadata = field->metadata())
     {
-        auto extension_name = field_kv_metadata->Get("ARROW:extension:name");
+        auto extension_name = field_kv_metadata->Get(ARROW_EXTENSION_NAME_KEY);
         if (extension_name.ok())
         {
             osExtensionName = *extension_name;
         }
     }
 
-    // Preliminary/in-advance read support for future JSON Canonical Extension
-    // Cf https://github.com/apache/arrow/pull/41257 and
-    // https://github.com/apache/arrow/pull/13901
     if (!osExtensionName.empty() &&
         osExtensionName != EXTENSION_NAME_ARROW_JSON)
     {
@@ -2385,8 +2382,9 @@ inline OGRFeature *OGRArrowLayer::ReadFeature(
                 arrow::LargeBinaryArray::offset_type out_length = 0;
                 const uint8_t *data =
                     castArray->GetValue(nIdxInBatch, &out_length);
-                if (out_length <= INT_MAX)
+                if (out_length >= 0 && out_length <= INT_MAX - 1)
                 {
+                    // coverity[overflow_sink]
                     poFeature->SetField(i, static_cast<int>(out_length), data);
                 }
                 else

@@ -225,6 +225,15 @@ TYPEMAP_ARGOUT_ARGOUT_ARRAY_IS_VALID(6)
   /* %typemap(out) IF_ERROR_RETURN_NONE */
 }
 
+%typemap(ret) IF_ERROR_RETURN_NONE
+{
+  /* %typemap(ret) IF_ERROR_RETURN_NONE */
+  if ($1 != CE_None ) {
+    Py_XDECREF( $result );
+    $result = Py_None;
+    Py_INCREF($result);
+  }
+}
 
 %import "ogr_error_map.i"
 
@@ -3065,6 +3074,20 @@ OBJECT_LIST_INPUT(GDALEDTComponentHS)
 %#endif
 }
 
+%typemap(in) GDALAccess
+{
+    // %typemap(in) GDALAccess
+    int val = 0;
+    int ecode = SWIG_AsVal_int($input, &val);
+    if (!SWIG_IsOK(ecode)) {
+        SWIG_exception_fail(SWIG_ArgError(ecode), "invalid value for GDALAccess");
+    }
+    if( val != GA_ReadOnly && val != GA_Update )
+    {
+        SWIG_exception_fail(SWIG_ValueError, "invalid value for GDALAccess");
+    }
+    $1 = static_cast<GDALAccess>(val);
+}
 
 %typemap(in) GDALRIOResampleAlg
 {

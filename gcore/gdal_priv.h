@@ -207,6 +207,8 @@ class CPL_DLL GDALMajorObject
 /* ******************************************************************** */
 
 //! @cond Doxygen_Suppress
+class GDALOpenInfo;
+
 class CPL_DLL GDALDefaultOverviews
 {
     friend class GDALDataset;
@@ -238,7 +240,12 @@ class CPL_DLL GDALDefaultOverviews
     ~GDALDefaultOverviews();
 
     void Initialize(GDALDataset *poDSIn, const char *pszName = nullptr,
-                    char **papszSiblingFiles = nullptr, int bNameIsOVR = FALSE);
+                    CSLConstList papszSiblingFiles = nullptr,
+                    bool bNameIsOVR = false);
+
+    void Initialize(GDALDataset *poDSIn, GDALOpenInfo *poOpenInfo,
+                    const char *pszName = nullptr,
+                    bool bTransferSiblingFilesIfLoaded = true);
 
     void TransferSiblingFiles(char **papszSiblingFiles);
 
@@ -1469,6 +1476,7 @@ GDALHashSetBandBlockCacheCreate(GDALRasterBand *poBand);
 /* ******************************************************************** */
 
 class GDALMDArray;
+class GDALDoublePointsCache;
 
 /** Range of values found in a mask band */
 typedef enum
@@ -1602,6 +1610,8 @@ class CPL_DLL GDALRasterBand : public GDALMajorObject
     void LeaveReadWrite();
     void InitRWLock();
     void SetValidPercent(GUIntBig nSampleCount, GUIntBig nValidCount);
+
+    mutable std::unique_ptr<GDALDoublePointsCache> m_oPointsCache{};
 
     //! @endcond
 
@@ -1796,6 +1806,11 @@ class CPL_DLL GDALRasterBand : public GDALMajorObject
                               double *pdfDataPct = nullptr);
 
     std::shared_ptr<GDALMDArray> AsMDArray() const;
+
+    CPLErr InterpolateAtPoint(double dfPixel, double dfLine,
+                              GDALRIOResampleAlg eInterpolation,
+                              double *pdfRealValue,
+                              double *pdfImagValue = nullptr) const;
 
 #ifndef DOXYGEN_XML
     void ReportError(CPLErr eErrClass, CPLErrorNum err_no, const char *fmt, ...)
@@ -3416,12 +3431,12 @@ class CPL_DLL GDALMDArray : virtual public GDALAbstractMDArray,
                                   const GDALExtendedDataType &bufferDataType,
                                   void *pDstBuffer) const;
 
-    static std::shared_ptr<GDALMDArray>
-    CreateGLTOrthorectified(const std::shared_ptr<GDALMDArray> &poParent,
-                            const std::shared_ptr<GDALMDArray> &poGLTX,
-                            const std::shared_ptr<GDALMDArray> &poGLTY,
-                            int nGLTIndexOffset,
-                            const std::vector<double> &adfGeoTransform);
+    static std::shared_ptr<GDALMDArray> CreateGLTOrthorectified(
+        const std::shared_ptr<GDALMDArray> &poParent,
+        const std::shared_ptr<GDALGroup> &poRootGroup,
+        const std::shared_ptr<GDALMDArray> &poGLTX,
+        const std::shared_ptr<GDALMDArray> &poGLTY, int nGLTIndexOffset,
+        const std::vector<double> &adfGeoTransform, CSLConstList papszOptions);
 
     //! @endcond
 
@@ -4332,12 +4347,12 @@ int CPL_DLL GDALCheckBandCount(int nBands, int bIsZeroAllowed);
 int CPL_DLL GDALReadWorldFile2(const char *pszBaseFilename,
                                const char *pszExtension,
                                double *padfGeoTransform,
-                               char **papszSiblingFiles,
+                               CSLConstList papszSiblingFiles,
                                char **ppszWorldFileNameOut);
 int CPL_DLL GDALReadTabFile2(const char *pszBaseFilename,
                              double *padfGeoTransform, char **ppszWKT,
                              int *pnGCPCount, GDAL_GCP **ppasGCPs,
-                             char **papszSiblingFiles,
+                             CSLConstList papszSiblingFiles,
                              char **ppszTabFileNameOut);
 
 void CPL_DLL GDALCopyRasterIOExtraArg(GDALRasterIOExtraArg *psDestArg,

@@ -892,8 +892,8 @@ bool GDALGroup::CopyFrom(const std::shared_ptr<GDALGroup> &poDstRootGroup,
                                                          '_' + dim->GetName());
                             newDimName = newDimNamePrefix;
                             int nIterCount = 2;
-                            while (mapExistingDstDims.find(newDimName) !=
-                                   mapExistingDstDims.end())
+                            while (
+                                cpl::contains(mapExistingDstDims, newDimName))
                             {
                                 newDimName = newDimNamePrefix +
                                              CPLSPrintf("_%d", nIterCount);
@@ -1148,9 +1148,8 @@ bool GDALGroup::CopyFrom(const std::shared_ptr<GDALGroup> &poDstRootGroup,
             auto srcArray = poSrcGroup->OpenMDArray(name);
             EXIT_OR_CONTINUE_IF_NULL(srcArray);
 
-            const auto oIterDimName =
-                mapSrcVariableNameToIndexedDimName.find(srcArray->GetName());
-            if (oIterDimName != mapSrcVariableNameToIndexedDimName.end())
+            if (cpl::contains(mapSrcVariableNameToIndexedDimName,
+                              srcArray->GetName()))
             {
                 if (!CopyArray(srcArray))
                     return false;
@@ -1163,9 +1162,8 @@ bool GDALGroup::CopyFrom(const std::shared_ptr<GDALGroup> &poDstRootGroup,
             auto srcArray = poSrcGroup->OpenMDArray(name);
             EXIT_OR_CONTINUE_IF_NULL(srcArray);
 
-            const auto oIterDimName =
-                mapSrcVariableNameToIndexedDimName.find(srcArray->GetName());
-            if (oIterDimName == mapSrcVariableNameToIndexedDimName.end())
+            if (!cpl::contains(mapSrcVariableNameToIndexedDimName,
+                               srcArray->GetName()))
             {
                 if (!CopyArray(srcArray))
                     return false;
@@ -1308,8 +1306,8 @@ GDALGroup::ResolveMDArray(const std::string &osName,
                 GetInnerMostGroup(osPath, curGroupHolder, osLastPart);
             if (poGroupPtr)
                 poGroup = poGroupPtr->OpenGroup(osLastPart);
-            if (poGroup && oSetAlreadyVisited.find(poGroup->GetFullName()) ==
-                               oSetAlreadyVisited.end())
+            if (poGroup &&
+                !cpl::contains(oSetAlreadyVisited, poGroup->GetFullName()))
             {
                 oQueue.push(poGroup);
                 goOn = true;
@@ -1340,9 +1338,8 @@ GDALGroup::ResolveMDArray(const std::string &osName,
                 for (const auto &osGroupName : aosGroupNames)
                 {
                     auto poSubGroup = groupPtr->OpenGroup(osGroupName);
-                    if (poSubGroup &&
-                        oSetAlreadyVisited.find(poSubGroup->GetFullName()) ==
-                            oSetAlreadyVisited.end())
+                    if (poSubGroup && !cpl::contains(oSetAlreadyVisited,
+                                                     poSubGroup->GetFullName()))
                     {
                         oQueue.push(poSubGroup);
                         oSetAlreadyVisited.insert(poSubGroup->GetFullName());
@@ -1853,7 +1850,7 @@ bool GDALAbstractMDArray::CheckReadWriteParams(
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Not all elements pointed by buffer will fit in "
                  "[buffer_alloc_start, "
-                 "buffer_alloc_start + buffer_alloc_size[");
+                 "buffer_alloc_start + buffer_alloc_size]");
     };
 
     const auto &dims = GetDimensions();
@@ -3116,6 +3113,7 @@ lbl_next_depth:
             goto end;
     }
 
+    assert(dimIdx > 0);
     dimIdx--;
     // cppcheck-suppress negativeContainerIndex
     switch (stack[dimIdx].return_point)
@@ -8440,7 +8438,18 @@ lbl_next_depth:
  * orthorectifying a NASA EMIT dataset.
  *
  * For NASA EMIT datasets, if apoNewDims[] and poTargetSRS is NULL, the
- * geometry lookup table (GLT) is used for fast orthorectification.
+ * geometry lookup table (GLT) is used by default for fast orthorectification.
+ *
+ * Options available are:
+ * <ul>
+ * <li>EMIT_ORTHORECTIFICATION=YES/NO: defaults to YES for a NASA EMIT dataset.
+ * Can be set to NO to use generic reprojection method.
+ * </li>
+ * <li>USE_GOOD_WAVELENGTHS=YES/NO: defaults to YES. Only used for EMIT
+ * orthorectification to take into account the value of the
+ * /sensor_band_parameters/good_wavelengths array to decide if slices of the
+ * current array along the band dimension are valid.</li>
+ * </ul>
  *
  * @param apoNewDims New dimensions. Its size should be GetDimensionCount().
  *                   apoNewDims[i] can be NULL to let the method automatically
@@ -8510,9 +8519,9 @@ std::shared_ptr<GDALMDArray> GDALMDArray::GetResampled(
                     poGLT_Y->GetDimensions()[1]->GetName() == "ortho_x")
                 {
                     return CreateGLTOrthorectified(
-                        self, poGLT_X, poGLT_Y,
+                        self, poRootGroup, poGLT_X, poGLT_Y,
                         /* nGLTIndexOffset = */ -1,
-                        poAttrGeotransform->ReadAsDoubleArray());
+                        poAttrGeotransform->ReadAsDoubleArray(), papszOptions);
                 }
             }
         }
