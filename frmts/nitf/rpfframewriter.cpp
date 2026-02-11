@@ -1900,7 +1900,8 @@ CADRGGetClippedDataset(GDALDataset *poSrcDS, double dfXMin, double dfYMin,
 /************************************************************************/
 
 static std::unique_ptr<GDALDataset>
-CADRGGetPalettedDataset(GDALDataset *poSrcDS, GDALColorTable *poCT)
+CADRGGetPalettedDataset(GDALDataset *poSrcDS, GDALColorTable *poCT,
+                        int nColorQuantizationBits)
 {
     CPLAssert(poSrcDS->GetRasterCount() == 3 || poSrcDS->GetRasterCount() == 4);
     auto poMemDrv = GetGDALDriverManager()->GetDriverByName("MEM");
@@ -1921,8 +1922,7 @@ CADRGGetPalettedDataset(GDALDataset *poSrcDS, GDALColorTable *poCT)
             GDALRasterBand::ToHandle(poSrcDS->GetRasterBand(2)),
             GDALRasterBand::ToHandle(poSrcDS->GetRasterBand(3)),
             GDALRasterBand::ToHandle(poPalettedDS->GetRasterBand(1)),
-            GDALColorTable::ToHandle(poCT),
-            /* bit depth = */ 5, nullptr,
+            GDALColorTable::ToHandle(poCT), nColorQuantizationBits, nullptr,
             /* dither = */ false, nullptr, nullptr);
     }
     return poPalettedDS;
@@ -2092,6 +2092,21 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
     GDALColorTable oCT;
     double dfLastPct = 0;
 
+    constexpr int DEFAULT_QUANTIZATION_BITS = 5;
+    const char *pszBits =
+        CSLFetchNameValue(papszOptions, "COLOR_QUANTIZATION_BITS");
+    int nColorQuantizationBits = DEFAULT_QUANTIZATION_BITS;
+    if (pszBits)
+    {
+        nColorQuantizationBits = atoi(pszBits);
+        if (nColorQuantizationBits < 5 || nColorQuantizationBits > 8)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "COLOR_QUANTIZATION_BITS value must be between 5 and 8");
+            return false;
+        }
+    }
+
     if (poSrcDS->GetRasterCount() == 1)
     {
         if (!poCT)
@@ -2122,8 +2137,10 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
                 GDALRasterBand::ToHandle(poSrcDS->GetRasterBand(1)),
                 GDALRasterBand::ToHandle(poSrcDS->GetRasterBand(2)),
                 GDALRasterBand::ToHandle(poSrcDS->GetRasterBand(3)), nullptr,
-                CADRG_MAX_COLOR_ENTRY_COUNT, GDALColorTable::ToHandle(&oCT),
-                GDALScaledProgress, pScaledData.get()) != CE_None)
+                nullptr, nullptr, nullptr, CADRG_MAX_COLOR_ENTRY_COUNT,
+                nColorQuantizationBits, static_cast<GUIntBig *>(nullptr),
+                GDALColorTable::ToHandle(&oCT), GDALScaledProgress,
+                pScaledData.get()) != CE_None)
         {
             return false;
         }
@@ -2144,7 +2161,8 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
     {
         if (!poCT)
         {
-            auto poPalettedDS = CADRGGetPalettedDataset(poSrcDS, &oCT);
+            auto poPalettedDS =
+                CADRGGetPalettedDataset(poSrcDS, &oCT, nColorQuantizationBits);
             if (!poPalettedDS)
                 return false;
             std::unique_ptr<void, decltype(&GDALDestroyScaledProgress)>
@@ -2274,7 +2292,8 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
             }
             else
             {
-                auto poPalettedDS = CADRGGetPalettedDataset(poSrcDS, &oCT);
+                auto poPalettedDS = CADRGGetPalettedDataset(
+                    poSrcDS, &oCT, nColorQuantizationBits);
                 if (!poPalettedDS)
                     return false;
                 return NITFDataset::CreateCopy(
@@ -2408,7 +2427,8 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
                             else
                             {
                                 poClippedDS = CADRGGetPalettedDataset(
-                                    poClippedDS.get(), &oCT);
+                                    poClippedDS.get(), &oCT,
+                                    nColorQuantizationBits);
                             }
                         }
 
