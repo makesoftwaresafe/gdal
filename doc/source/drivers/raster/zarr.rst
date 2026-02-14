@@ -84,7 +84,8 @@ Sharding support
 .. versionadded:: 3.13
 
 `Zarr v3 sharding <https://zarr-specs.readthedocs.io/en/latest/v3/codecs/sharding-indexed/index.html>`__
-is supported in read-only since GDAL 3.13.
+is supported since GDAL 3.13. Write support involves setting the
+:co:`SHARD_CHUNK_SHAPE` array creation option.
 
 Kerchunk reference stores
 -------------------------
@@ -549,6 +550,17 @@ with ``ARRAY:`` using :program:`gdalmdimtranslate`):
       Comma separated list of chunk size along each dimension.
       If not specified, the fastest varying 2 dimensions (the last ones) used a
       block size of 256 samples, and the other ones of 1.
+
+-  .. co:: SHARD_CHUNK_SHAPE
+      :choices: <string>
+      :since: 3.13
+
+      Comma-separated inner chunk dimensions for Zarr V3 sharded storage.
+      When set, :co:`BLOCKSIZE` defines the shard dimensions and this option
+      defines the inner chunk dimensions within each shard.
+      Each value must evenly divide the corresponding :co:`BLOCKSIZE`
+      dimension. For example, ``BLOCKSIZE=256,256`` with
+      ``SHARD_CHUNK_SHAPE=64,64`` creates shards of 4x4=16 inner chunks.
 
 -  .. co:: CHUNK_MEMORY_LAYOUT
       :choices: C, F
