@@ -31,6 +31,11 @@
 
 #define CRS_ATTRIBUTE_NAME "_CRS"
 
+// UUID identifying the multiscales zarr convention
+// (https://github.com/zarr-conventions/multiscales)
+constexpr const char *ZARR_MULTISCALES_UUID =
+    "d35379db-88df-4056-af3a-620245f8e347";
+
 const CPLCompressor *ZarrGetShuffleCompressor();
 const CPLCompressor *ZarrGetShuffleDecompressor();
 const CPLCompressor *ZarrGetQuantizeDecompressor();
