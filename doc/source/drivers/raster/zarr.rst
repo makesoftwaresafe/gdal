@@ -86,6 +86,22 @@ Sharding support
 `Zarr v3 sharding <https://zarr-specs.readthedocs.io/en/latest/v3/codecs/sharding-indexed/index.html>`__
 is supported in read-only since GDAL 3.13.
 
+Multiscales (overviews / pyramids)
+----------------------------------
+
+.. versionadded:: 3.13
+
+The driver supports reading the Zarr
+`multiscales convention <https://github.com/zarr-conventions/multiscales>`__
+for Zarr V3 datasets. This convention describes a pyramid of arrays at
+decreasing resolutions within a group hierarchy.
+
+When a Zarr V3 array has a parent (or grandparent) group whose
+attributes contain a ``zarr_conventions`` entry with the multiscales UUID and
+a ``multiscales`` attribute with a ``layout`` array, the driver exposes
+lower-resolution levels as overviews via :cpp:func:`GDALMDArray::GetOverview`
+and the classic raster band overview API.
+
 Kerchunk reference stores
 -------------------------
 
@@ -758,3 +774,5 @@ See Also:
 .. spelling:word-list::
     Kerchunk
     Sharding
+    multiscales
+    Multiscales

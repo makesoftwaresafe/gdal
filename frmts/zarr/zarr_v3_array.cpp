@@ -2237,11 +2237,7 @@ void ZarrV3Array::LoadOverviews() const
 
     const auto oZarrConventionsArray = oZarrConventions.ToArray();
     const auto hasMultiscalesUUIDLambda = [](const CPLJSONObject &obj)
-    {
-        constexpr const char *MULTISCALES_UUID =
-            "d35379db-88df-4056-af3a-620245f8e347";
-        return obj.GetString("uuid") == MULTISCALES_UUID;
-    };
+    { return obj.GetString("uuid") == ZARR_MULTISCALES_UUID; };
     const bool bFoundMultiScalesUUID =
         std::find_if(oZarrConventionsArray.begin(), oZarrConventionsArray.end(),
                      hasMultiscalesUUIDLambda) != oZarrConventionsArray.end();
