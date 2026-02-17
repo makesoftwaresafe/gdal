@@ -2036,7 +2036,8 @@ bool RPFFrameWriteCADRG_RPFDES(GDALOffsetPatcher::OffsetPatcher *offsetPatcher,
 static std::unique_ptr<GDALDataset>
 CADRGGetWarpedVRTDataset(GDALDataset *poSrcDS, int nZone, double dfXMin,
                          double dfYMin, double dfXMax, double dfYMax,
-                         double dfResX, double dfResY)
+                         double dfResX, double dfResY,
+                         const char *pszResampling)
 {
     CPLStringList aosWarpArgs;
     aosWarpArgs.push_back("-of");
@@ -2064,7 +2065,7 @@ CADRGGetWarpedVRTDataset(GDALDataset *poSrcDS, int nZone, double dfXMin,
     else
     {
         aosWarpArgs.push_back("-r");
-        aosWarpArgs.push_back("cubic");
+        aosWarpArgs.push_back(CPLString(pszResampling).tolower());
         if (poSrcDS->GetRasterCount() == 3)
             aosWarpArgs.push_back("-dstalpha");
     }
@@ -2192,6 +2193,9 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
 
     const char *pszSeriesCode =
         CSLFetchNameValueDef(papszOptions, "SERIES_CODE", "MM");
+
+    const std::string osResampling =
+        CSLFetchNameValueDef(papszOptions, "RESAMPLING", "CUBIC");
 
     const char *pszScale = CSLFetchNameValue(papszOptions, "SCALE");
     if (pszScale)
@@ -2658,7 +2662,7 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
 
                 auto poWarpedDS = CADRGGetWarpedVRTDataset(
                     poSrcDS, frameDef.nZone, dfXMin, dfYMin, dfXMax, dfYMax,
-                    frameDef.dfResX, frameDef.dfResY);
+                    frameDef.dfResX, frameDef.dfResY, osResampling.c_str());
                 if (!poWarpedDS)
                     return false;
 
