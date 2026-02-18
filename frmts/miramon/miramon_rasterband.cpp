@@ -10,6 +10,7 @@
  *
  * SPDX-License-Identifier: MIT
  ****************************************************************************/
+#include <algorithm>
 
 #include "miramon_dataset.h"
 #include "miramon_rasterband.h"
@@ -442,7 +443,6 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
         return CE_Failure;
     }
 
-    int nNRATColumns = 0;
     // 0 column: category value
     if (oAttributteTable.pField[nFieldIndex].DecimalsIfFloat)
     {
@@ -450,8 +450,6 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
                            oAttributteTable.pField[nFieldIndex].FieldName,
                            GFT_Real, GFU_MinMax))
             return CE_Failure;
-
-        nNRATColumns++;
     }
     else
     {
@@ -459,8 +457,6 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
                            oAttributteTable.pField[nFieldIndex].FieldName,
                            GFT_Integer, GFU_MinMax))
             return CE_Failure;
-
-        nNRATColumns++;
     }
 
     GDALRATFieldUsage eFieldUsage;
@@ -491,14 +487,11 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
                            oAttributteTable.pField[nIField].FieldName,
                            eFieldType, eFieldUsage))
             return CE_Failure;
-
-        nNRATColumns++;
     }
 
     VSIFSeekL(oAttributteTable.pfDataBase,
               static_cast<vsi_l_offset>(oAttributteTable.FirstRecordOffset),
               SEEK_SET);
-    m_poDefaultRAT->SetRowCount(nNRATColumns);
 
     MM_ACCUMULATED_BYTES_TYPE_DBF nBufferSize =
         oAttributteTable.BytesPerRecord + 1;
@@ -509,6 +502,7 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
                  "Out of memory allocating working buffer");
         VSIFCloseL(oAttributteTable.pfDataBase);
         MM_ReleaseMainFields(&oAttributteTable);
+        return CE_Failure;
     }
 
     char *pszField = static_cast<char *>(VSI_CALLOC_VERBOSE(1, nBufferSize));
@@ -519,6 +513,7 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
         VSIFree(pzsRecord);
         VSIFCloseL(oAttributteTable.pfDataBase);
         MM_ReleaseMainFields(&oAttributteTable);
+        return CE_Failure;
     }
 
     for (int nIRecord = 0;
@@ -559,6 +554,7 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
             MM_ReleaseMainFields(&oAttributteTable);
             return CE_Failure;
         }
+        m_poDefaultRAT->SetRowCount(nCatField + 1);
         m_poDefaultRAT->SetValue(nCatField, 0, osCatField.c_str());
 
         int nIOrderedField = 1;
@@ -598,8 +594,10 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
                 MM_ReleaseMainFields(&oAttributteTable);
                 return CE_Failure;
             }
-            m_poDefaultRAT->SetValue(nCatField, nIOrderedField,
-                                     osField.c_str());
+            m_poDefaultRAT->SetRowCount(nCatField + 1);
+            if (CE_None != m_poDefaultRAT->SetValue(nCatField, nIOrderedField,
+                                                    osField.c_str()))
+                return CE_Failure;
             nIOrderedField++;
         }
     }
@@ -637,17 +635,42 @@ CPLErr MMRRasterBand::AssignUniformColorTable()
     if (!poBand)
         return CE_Failure;
 
-    // Only for 1 or 2 bytes images
-    if (m_eMMBytesPerPixel !=
-            MMBytesPerPixel::TYPE_BYTES_PER_PIXEL_BYTE_I_RLE &&
-        m_eMMBytesPerPixel !=
-            MMBytesPerPixel::TYPE_BYTES_PER_PIXEL_INTEGER_I_RLE)
+    int nNPossibleValues;
+    double maxIndex = 0.0;
+
+    if (poBand->BandHasNoData() && poBand->GetNoDataValue() < 0)
+        return CE_Failure;
+
+    if (poBand->GetVisuMaxSet() && poBand->GetVisuMax() < 0)
+        return CE_Failure;
+
+    if (poBand->BandHasNoData() &&
+        static_cast<int>(poBand->GetNoDataValue()) < INT_MAX)
+        maxIndex = poBand->GetNoDataValue() + 1;
+
+    if (poBand->GetVisuMaxSet() &&
+        static_cast<int>(poBand->GetVisuMax()) < INT_MAX)
+        maxIndex = std::max(maxIndex, poBand->GetVisuMax() + 1);
+
+    if (maxIndex != 0)
+        nNPossibleValues = static_cast<int>(maxIndex);
+    else
     {
-        return CE_None;
+        // Only for 1 or 2 bytes images
+        if (m_eMMBytesPerPixel !=
+                MMBytesPerPixel::TYPE_BYTES_PER_PIXEL_BYTE_I_RLE &&
+            m_eMMBytesPerPixel !=
+                MMBytesPerPixel::TYPE_BYTES_PER_PIXEL_INTEGER_I_RLE)
+        {
+            return CE_None;
+        }
+
+        nNPossibleValues = 1 << (8 * static_cast<int>(m_eMMBytesPerPixel));
     }
 
-    const int nNPossibleValues = 1
-                                 << (8 * static_cast<int>(m_eMMBytesPerPixel));
+    if (nNPossibleValues <= 0)
+        return CE_Failure;
+
     for (int iColumn = 0; iColumn < 4; iColumn++)
     {
         try
