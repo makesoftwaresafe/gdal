@@ -973,17 +973,15 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
         return nullptr;
     }
 
-    HDF5ImageDataset *poDS = new HDF5ImageDataset();
+    auto poDS = std::make_unique<HDF5ImageDataset>();
 
     // Create a corresponding GDALDataset.
-    char **papszName =
+    const CPLStringList aosFilenameTokens(
         CSLTokenizeString2(poOpenInfo->pszFilename, ":",
-                           CSLT_HONOURSTRINGS | CSLT_PRESERVEESCAPES);
+                           CSLT_HONOURSTRINGS | CSLT_PRESERVEESCAPES));
 
-    if (!(CSLCount(papszName) == 3 || CSLCount(papszName) == 4))
+    if (aosFilenameTokens.size() != 3 && aosFilenameTokens.size() != 4)
     {
-        CSLDestroy(papszName);
-        delete poDS;
         return nullptr;
     }
 
@@ -992,24 +990,23 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
     // Check for drive name in windows HDF5:"D:\...
     CPLString osSubdatasetName;
 
-    CPLString osFilename(papszName[1]);
+    CPLString osFilename(aosFilenameTokens[1]);
 
-    if ((strlen(papszName[1]) == 1 && papszName[3] != nullptr) ||
-        (STARTS_WITH(papszName[1], "/vsicurl/http") && papszName[3] != nullptr))
+    if ((strlen(aosFilenameTokens[1]) == 1 &&
+         aosFilenameTokens[3] != nullptr) ||
+        (STARTS_WITH(aosFilenameTokens[1], "/vsicurl/http") &&
+         aosFilenameTokens[3] != nullptr))
     {
         osFilename += ":";
-        osFilename += papszName[2];
-        osSubdatasetName = papszName[3];
+        osFilename += aosFilenameTokens[2];
+        osSubdatasetName = aosFilenameTokens[3];
     }
     else
     {
-        osSubdatasetName = papszName[2];
+        osSubdatasetName = aosFilenameTokens[2];
     }
 
     poDS->SetSubdatasetName(osSubdatasetName);
-
-    CSLDestroy(papszName);
-    papszName = nullptr;
 
     poDS->SetPhysicalFilename(osFilename);
 
@@ -1017,14 +1014,12 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->m_hHDF5 = GDAL_HDF5Open(osFilename);
     if (poDS->m_hHDF5 < 0)
     {
-        delete poDS;
         return nullptr;
     }
 
     poDS->hGroupID = H5Gopen(poDS->m_hHDF5, "/");
     if (poDS->hGroupID < 0)
     {
-        delete poDS;
         return nullptr;
     }
 
@@ -1037,7 +1032,6 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (poDS->poH5Objects == nullptr)
     {
-        delete poDS;
         return nullptr;
     }
 
@@ -1047,7 +1041,6 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->ndims = H5Sget_simple_extent_ndims(poDS->dataspace_id);
     if (poDS->ndims <= 0)
     {
-        delete poDS;
         return nullptr;
     }
     poDS->dims =
@@ -1063,7 +1056,6 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "At least one dimension size exceeds INT_MAX !");
-            delete poDS;
             return nullptr;
         }
     }
@@ -1076,7 +1068,6 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
     if (eGDALDataType == GDT_Unknown)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Unhandled HDF5 data type");
-        delete poDS;
         return nullptr;
     }
 
@@ -1319,10 +1310,8 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
 
     for (int i = 0; i < nBands; i++)
     {
-        HDF5ImageRasterBand *const poBand =
-            new HDF5ImageRasterBand(poDS, i + 1, eGDALDataType);
-
-        poDS->SetBand(i + 1, poBand);
+        auto poBand = std::make_unique<HDF5ImageRasterBand>(poDS.get(), i + 1,
+                                                            eGDALDataType);
 
         if (poDS->poH5Objects->nType == H5G_DATASET)
         {
@@ -1332,6 +1321,8 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
                 poBand->SetMetadataItem(oIter.first.c_str(), oIter.second[i]);
             }
         }
+
+        poDS->SetBand(i + 1, std::move(poBand));
     }
 
     if (!poDS->GetMetadata("GEOLOCATION"))
@@ -1382,9 +1373,9 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->SetPamFlags(poDS->GetPamFlags() & ~GPF_DIRTY);
 
     // Setup overviews.
-    poDS->oOvManager.Initialize(poDS, ":::VIRTUAL:::");
+    poDS->oOvManager.Initialize(poDS.get(), ":::VIRTUAL:::");
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/
