@@ -2681,6 +2681,24 @@
             <field name="IMAGE_CODE_BIT_LENGTH" length="1" type="UnsignedInt_BigEndian"/>
         </rpf_component>
 
+        <rpf_component id="ColorConverterSubsection">
+            <field name="COLOR_CONVERTER_OFFSET_TABLE_OFFSET" length="4" type="UnsignedInt_BigEndian"/>
+            <field name="COLOR_CONVERTER_OFFSET_RECORD_LENGTH" length="2" type="UnsignedInt_BigEndian"/>
+            <field name="COLOR_CONVERTER_RECORD_LENGTH" length="2" type="UnsignedInt_BigEndian"/>
+            <loop counter="NUMBER_OF_COLOR_CONVERTER_OFFSET_RECORDS"  name="COLOR_CONVERTER_OFFSET_RECORD">
+                <field name="COLOR_CONVERTER_TABLE_ID" length="2" type="UnsignedInt_BigEndian"/>
+                <field name="NUMBER_OF_COLOR_CONVERTER_RECORDS" length="4" type="UnsignedInt_BigEndian"/>
+                <field name="COLOR_CONVERTER_TABLE_OFFSET" length="4" type="UnsignedInt_BigEndian"/>
+                <field name="SOURCE_OFFSET_TABLE_OFFSET" length="4" type="UnsignedInt_BigEndian"/>
+                <field name="TARGET_OFFSET_TABLE_OFFSET" length="4" type="UnsignedInt_BigEndian"/>
+            </loop>
+            <loop counter="NUMBER_OF_COLOR_CONVERTER_OFFSET_RECORDS" name="COLOR_CONVERTER_TABLE">
+                <loop counter="NUMBER_OF_COLOR_CONVERTER_RECORDS">
+                    <field name="TARGET_COLOR_GRAYSCALE_TABLE_ENTRY_NUMBER" length="4" type="UnsignedInt_BigEndian"/>
+                </loop>
+            </loop>
+        </rpf_component>
+
         <rpf_component id="MaskSubsection">
             <field name="SUBFRAME_SEQUENCE_RECORD_LENGTH" length="2" type="UnsignedInt_BigEndian"/>
             <field name="TRANSPARENCY_SEQUENCE_RECORD_LENGTH" length="2" type="UnsignedInt_BigEndian"/>
