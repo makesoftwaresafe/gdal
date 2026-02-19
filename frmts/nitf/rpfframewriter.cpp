@@ -2244,6 +2244,12 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
         nReciprocalScale = RPFCADRGGetScaleFromDataSeriesCode(pszSeriesCode);
     }
 
+    if (pszDPI && !(pszScale && EQUAL(pszScale, "GUESS")))
+    {
+        CPLError(CE_Warning, CPLE_AppDefined,
+                 "DPI is ignored when SCALE is not set to GUESS");
+    }
+
     const CPLString osExtUpperCase(
         CPLString(CPLGetExtensionSafe(pszFilename)).toupper());
     bool bLooksLikeCADRGFilename = (osExtUpperCase == "NTF");
