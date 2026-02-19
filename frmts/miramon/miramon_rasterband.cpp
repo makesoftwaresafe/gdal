@@ -516,8 +516,11 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
         return CE_Failure;
     }
 
+    CPLErr eErr = CE_None;
     for (int nIRecord = 0;
-         nIRecord < static_cast<int>(oAttributteTable.nRecords); nIRecord++)
+         eErr == CE_None &&
+         nIRecord < static_cast<int>(oAttributteTable.nRecords);
+         nIRecord++)
     {
         if (oAttributteTable.BytesPerRecord !=
             VSIFReadL(pzsRecord, sizeof(unsigned char),
@@ -527,11 +530,8 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
             CPLError(CE_Failure, CPLE_AppDefined,
                      "Invalid attribute table: \"%s\"", osDBFName.c_str());
 
-            VSIFree(pzsRecord);
-            VSIFree(pszField);
-            VSIFCloseL(oAttributteTable.pfDataBase);
-            MM_ReleaseMainFields(&oAttributteTable);
-            return CE_Failure;
+            eErr = CE_Failure;
+            break;
         }
 
         // Category index
@@ -548,11 +548,8 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
             CPLError(CE_Failure, CPLE_AppDefined,
                      "Invalid attribute table: \"%s\"", osDBFName.c_str());
 
-            VSIFree(pzsRecord);
-            VSIFree(pszField);
-            VSIFCloseL(oAttributteTable.pfDataBase);
-            MM_ReleaseMainFields(&oAttributteTable);
-            return CE_Failure;
+            eErr = CE_Failure;
+            break;
         }
         m_poDefaultRAT->SetRowCount(nCatField + 1);
         m_poDefaultRAT->SetValue(nCatField, 0, osCatField.c_str());
@@ -588,16 +585,16 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
                 CPLError(CE_Failure, CPLE_AppDefined,
                          "Invalid attribute table: \"%s\"", osDBFName.c_str());
 
-                VSIFree(pzsRecord);
-                VSIFree(pszField);
-                VSIFCloseL(oAttributteTable.pfDataBase);
-                MM_ReleaseMainFields(&oAttributteTable);
-                return CE_Failure;
+                eErr = CE_Failure;
+                break;
             }
             m_poDefaultRAT->SetRowCount(nCatField + 1);
             if (CE_None != m_poDefaultRAT->SetValue(nCatField, nIOrderedField,
                                                     osField.c_str()))
-                return CE_Failure;
+            {
+                eErr = CE_Failure;
+                break;
+            }
             nIOrderedField++;
         }
     }
@@ -607,7 +604,7 @@ CPLErr MMRRasterBand::CreateRATFromDBF(const CPLString &osRELName,
     VSIFCloseL(oAttributteTable.pfDataBase);
     MM_ReleaseMainFields(&oAttributteTable);
 
-    return CE_None;
+    return eErr;
 }
 
 CPLErr MMRRasterBand::UpdateTableColorsFromPalette()
