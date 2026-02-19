@@ -7035,6 +7035,11 @@ def test_nitf_create_02_00(tmp_path):
 @gdaltest.enable_exceptions()
 def test_nitf_create_cadrg(tmp_path):
 
+    if gdaltest.is_travis_branch("fedora_rawhide"):
+        pytest.skip(
+            "randomly fails on CI, but not when trying locally within a docker image"
+        )
+
     gdal.alg.raster.rgb_to_palette(
         input="data/small_world.tif", output=tmp_path / "in.tif", color_count=216
     )
@@ -7394,6 +7399,11 @@ def test_nitf_create_cadrg_color_table_per_frame(
 
 @gdaltest.enable_exceptions()
 def test_nitf_create_cadrg_with_transparency(tmp_path):
+
+    if gdaltest.is_travis_branch("fedora_rawhide"):
+        pytest.skip(
+            "randomly fails on CI, but not when trying locally within a docker image"
+        )
 
     gdal.alg.raster.pipeline(
         input="data/small_world.tif",

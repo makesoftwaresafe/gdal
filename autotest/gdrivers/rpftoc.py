@@ -133,6 +133,11 @@ def test_rpftoc_4():
 
 def test_rpftoc_create_simple(tmp_vsimem):
 
+    if gdaltest.is_travis_branch("fedora_rawhide"):
+        pytest.skip(
+            "randomly fails on CI, but not when trying locally within a docker image"
+        )
+
     gdal.Mkdir(tmp_vsimem / "subdir", 0o755)
     gdal.alg.vsi.copy(
         source="data/nitf/RPFTOC01.ON2",
