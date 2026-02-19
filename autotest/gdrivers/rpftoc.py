@@ -342,3 +342,68 @@ def test_rpftoc_create_errors(tmp_vsimem):
         gdal.alg.driver.rpftoc.create(
             input=tmp_vsimem / "subdir", output="/i_do/not/exist/a.toc"
         )
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_rpftoc_create_two_scales(tmp_vsimem):
+
+    if gdaltest.is_travis_branch("fedora_rawhide"):
+        pytest.skip(
+            "randomly fails on CI, but not when trying locally within a docker image"
+        )
+
+    src_ds = gdal.Translate(
+        "",
+        "data/byte.tif",
+        format="MEM",
+        bandList=[1, 1, 1],
+        colorInterpretation=["red", "green", "blue"],
+    )
+    gdal.GetDriverByName("NITF").CreateCopy(
+        tmp_vsimem / "100k",
+        src_ds,
+        options=["PRODUCT_TYPE=CADRG", "SERIES_CODE=TC"],
+    )
+    gdal.GetDriverByName("NITF").CreateCopy(
+        tmp_vsimem / "200k",
+        src_ds,
+        options=["PRODUCT_TYPE=CADRG", "SERIES_CODE=AT"],
+    )
+
+    gdal.Mkdir(tmp_vsimem / "final", 0o755)
+    gdal.Mkdir(tmp_vsimem / "final" / "100k", 0o755)
+    gdal.Mkdir(tmp_vsimem / "final" / "200k", 0o755)
+    gdal.alg.vsi.copy(
+        source=tmp_vsimem / "100k/RPF/ZONE2/00AEH010.TC2",
+        destination=tmp_vsimem / "final" / "100k",
+    )
+    gdal.alg.vsi.copy(
+        source=tmp_vsimem / "200k/RPF/ZONE2/002CM010.AT2",
+        destination=tmp_vsimem / "final" / "200k",
+    )
+
+    gdal.alg.driver.rpftoc.create(input=tmp_vsimem / "final")
+
+    with gdaltest.error_raised(
+        gdal.CE_Warning,
+        match="appears to be an NITF file, but no image blocks were found on it",
+    ):
+        with gdal.OpenEx(
+            tmp_vsimem / "final" / "A.TOC", allowed_drivers=["NITF"]
+        ) as ds:
+            tre = ds.GetMetadata("xml:TRE")[0]
+
+    # Check that 200K is before 100K
+
+    assert """<group index="0">
+              <field name="PRODUCT_DATA_TYPE" value="CADRG" />
+              <field name="COMPRESSION_RATIO" value="55:1" />
+              <field name="SCALE_OR_RESOLUTION" value="1:200K" />""" in tre
+
+    assert """<group index="1">
+              <field name="PRODUCT_DATA_TYPE" value="CADRG" />
+              <field name="COMPRESSION_RATIO" value="55:1" />
+              <field name="SCALE_OR_RESOLUTION" value="1:100K" />""" in tre

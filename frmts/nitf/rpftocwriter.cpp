@@ -28,7 +28,7 @@ namespace
 struct FrameDesc
 {
     int nZone = 0;
-    int nScale = 0;
+    int nReciprocalScale = 0;
     int nFrameX = 0;
     int nFrameY = 0;
     double dfMinX = 0;
@@ -44,9 +44,24 @@ struct MinMaxFrameXY
     int MaxX = 0;
     int MaxY = 0;
 };
-}  // namespace
 
-using PairScaleZone = std::pair<int, int>;
+struct ScaleZone
+{
+    int nReciprocalScale = 0;
+    int nZone = 0;
+
+    bool operator<(const ScaleZone &other) const
+    {
+        // Sort reciprocal scale by decreasing order. This is apparently needed for
+        // some viewers like Falcon Lite to be able to display A.TOC files
+        // with multiple scales.
+        return nReciprocalScale > other.nReciprocalScale ||
+               (nReciprocalScale == other.nReciprocalScale &&
+                nZone < other.nZone);
+    }
+};
+
+}  // namespace
 
 /************************************************************************/
 /*                  Create_RPFTOC_LocationComponent()                   */
@@ -147,7 +162,7 @@ static std::string StrPadTruncate(const std::string &osIn, size_t nSize)
 static void Create_RPFTOC_BoundaryRectangleTable(
     GDALOffsetPatcher::OffsetPatcher &offsetPatcher,
     const std::string &osProducer,
-    const std::map<PairScaleZone, MinMaxFrameXY> &oMapScaleZoneToMinMaxFrameXY)
+    const std::map<ScaleZone, MinMaxFrameXY> &oMapScaleZoneToMinMaxFrameXY)
 {
     auto poBuffer = offsetPatcher.CreateBuffer(
         "BoundaryRectangleTable", /* bEndiannessIsLittle = */ false);
@@ -161,16 +176,17 @@ static void Create_RPFTOC_BoundaryRectangleTable(
         poBuffer->AppendString("55:1 ");  // COMPRESSION_RATIO
 
         std::string osScaleOrResolution;
-        const int nScale = scaleZone.first;
-        if (nScale >= Million && (nScale % Million) == 0)
-            osScaleOrResolution = CPLSPrintf("1:%dM", nScale / Million);
-        else if (nScale >= Kilo && (nScale % Kilo) == 0)
-            osScaleOrResolution = CPLSPrintf("1:%dK", nScale / Kilo);
+        const int nReciprocalScale = scaleZone.nReciprocalScale;
+        if (nReciprocalScale >= Million && (nReciprocalScale % Million) == 0)
+            osScaleOrResolution =
+                CPLSPrintf("1:%dM", nReciprocalScale / Million);
+        else if (nReciprocalScale >= Kilo && (nReciprocalScale % Kilo) == 0)
+            osScaleOrResolution = CPLSPrintf("1:%dK", nReciprocalScale / Kilo);
         else
-            osScaleOrResolution = CPLSPrintf("1:%d", nScale);
+            osScaleOrResolution = CPLSPrintf("1:%d", nReciprocalScale);
         poBuffer->AppendString(StrPadTruncate(osScaleOrResolution, 12));
 
-        const int nZone = scaleZone.second;
+        const int nZone = scaleZone.nZone;
         poBuffer->AppendString(CPLSPrintf("%c", RPFCADRGZoneNumToChar(nZone)));
         poBuffer->AppendString(StrPadTruncate(osProducer, 5));
 
@@ -179,10 +195,10 @@ static void Create_RPFTOC_BoundaryRectangleTable(
         double dfXMax = 0;
         double dfYMax = 0;
         double dfUnused = 0;
-        RPFGetCADRGFrameExtent(nZone, nScale, extent.MinX, extent.MinY, dfXMin,
-                               dfYMin, dfUnused, dfUnused);
-        RPFGetCADRGFrameExtent(nZone, nScale, extent.MaxX, extent.MaxY,
-                               dfUnused, dfUnused, dfXMax, dfYMax);
+        RPFGetCADRGFrameExtent(nZone, nReciprocalScale, extent.MinX,
+                               extent.MinY, dfXMin, dfYMin, dfUnused, dfUnused);
+        RPFGetCADRGFrameExtent(nZone, nReciprocalScale, extent.MaxX,
+                               extent.MaxY, dfUnused, dfUnused, dfXMax, dfYMax);
 
         double dfULX = dfXMin;
         double dfULY = dfYMax;
@@ -226,7 +242,7 @@ static void Create_RPFTOC_BoundaryRectangleTable(
         double lonResolution = 0;
         double latInterval = 0;
         double lonInterval = 0;
-        RPFGetCADRGResolutionAndInterval(nZone, nScale, latResolution,
+        RPFGetCADRGResolutionAndInterval(nZone, nReciprocalScale, latResolution,
                                          lonResolution, latInterval,
                                          lonInterval);
 
@@ -342,9 +358,8 @@ static std::string GetGEOREF(double dfLon, double dfLat)
 static void Create_RPFTOC_FrameFileIndexSubsection(
     GDALOffsetPatcher::OffsetPatcher &offsetPatcher,
     const std::string &osSecurityCountryCode,
-    const std::map<PairScaleZone, std::vector<FrameDesc>>
-        &oMapScaleZoneToFrames,
-    const std::map<PairScaleZone, MinMaxFrameXY> &oMapScaleZoneToMinMaxFrameXY,
+    const std::map<ScaleZone, std::vector<FrameDesc>> &oMapScaleZoneToFrames,
+    const std::map<ScaleZone, MinMaxFrameXY> &oMapScaleZoneToMinMaxFrameXY,
     const std::map<std::string, int> &oMapSubdirToIdx)
 {
     auto poBuffer = offsetPatcher.CreateBuffer(
@@ -353,7 +368,7 @@ static void Create_RPFTOC_FrameFileIndexSubsection(
     poBuffer->DeclareOffsetAtCurrentPosition(
         "FRAME_FILE_INDEX_SUBSECTION_LOCATION");
 
-    std::map<PairScaleZone, uint16_t> oMapScaleZoneToIdx;
+    std::map<ScaleZone, uint16_t> oMapScaleZoneToIdx;
     for ([[maybe_unused]] const auto &[scaleZone, unused] :
          oMapScaleZoneToFrames)
     {
@@ -425,9 +440,8 @@ static void Create_RPFTOC_FrameFileIndexSubsection(
 static bool RPCTOCCreateRPFDES(
     VSILFILE *fp, GDALOffsetPatcher::OffsetPatcher &offsetPatcher,
     const std::string &osProducer, const std::string &osSecurityCountryCode,
-    const std::map<PairScaleZone, std::vector<FrameDesc>>
-        &oMapScaleZoneToFrames,
-    const std::map<PairScaleZone, MinMaxFrameXY> &oMapScaleZoneToMinMaxFrameXY)
+    const std::map<ScaleZone, std::vector<FrameDesc>> &oMapScaleZoneToFrames,
+    const std::map<ScaleZone, MinMaxFrameXY> &oMapScaleZoneToMinMaxFrameXY)
 {
     (void)oMapScaleZoneToFrames;
 
@@ -583,9 +597,10 @@ static bool RPCTOCCreateRPFDES(
 /************************************************************************/
 
 static bool RPFTOCCollectFrames(
-    VSIDIR *psDir, const std::string &osInputDirectory, const int nScale,
-    std::map<PairScaleZone, std::vector<FrameDesc>> &oMapScaleZoneToFrames,
-    std::map<PairScaleZone, MinMaxFrameXY> &oMapScaleZoneToMinMaxFrameXY)
+    VSIDIR *psDir, const std::string &osInputDirectory,
+    const int nReciprocalScale,
+    std::map<ScaleZone, std::vector<FrameDesc>> &oMapScaleZoneToFrames,
+    std::map<ScaleZone, MinMaxFrameXY> &oMapScaleZoneToMinMaxFrameXY)
 {
 
     while (const VSIDIREntry *psEntry = VSIGetNextDirEntry(psDir))
@@ -627,7 +642,7 @@ static bool RPFTOCCollectFrames(
                      osDataSeriesCode.c_str(), osFullFilename.c_str());
         }
 
-        int nThisScale = nScale;
+        int nThisScale = nReciprocalScale;
         if (nThisScale == 0)
         {
             nThisScale =
@@ -694,7 +709,7 @@ static bool RPFTOCCollectFrames(
         // Store needed metadata on the frame
         FrameDesc desc;
         desc.nZone = nZone;
-        desc.nScale = nThisScale;
+        desc.nReciprocalScale = nThisScale;
         desc.nFrameX = frameDefinitions[0].nFrameMinX;
         desc.nFrameY = frameDefinitions[0].nFrameMinY;
         desc.dfMinX = sExtentWGS84.MinX;
@@ -736,7 +751,7 @@ static bool RPFTOCCollectFrames(
 
 bool RPFTOCCreate(const std::string &osInputDirectory,
                   const std::string &osOutputFilename,
-                  const char chIndexClassification, const int nScale,
+                  const char chIndexClassification, const int nReciprocalScale,
                   const std::string &osProducerID,
                   const std::string &osProducerName,
                   const std::string &osSecurityCountryCode,
@@ -754,9 +769,9 @@ bool RPFTOCCreate(const std::string &osInputDirectory,
         return false;
     }
 
-    std::map<PairScaleZone, std::vector<FrameDesc>> oMapScaleZoneToFrames;
-    std::map<PairScaleZone, MinMaxFrameXY> oMapScaleZoneToMinMaxFrameXY;
-    if (!RPFTOCCollectFrames(psDir.get(), osInputDirectory, nScale,
+    std::map<ScaleZone, std::vector<FrameDesc>> oMapScaleZoneToFrames;
+    std::map<ScaleZone, MinMaxFrameXY> oMapScaleZoneToMinMaxFrameXY;
+    if (!RPFTOCCollectFrames(psDir.get(), osInputDirectory, nReciprocalScale,
                              oMapScaleZoneToFrames,
                              oMapScaleZoneToMinMaxFrameXY))
     {
