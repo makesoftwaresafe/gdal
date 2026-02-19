@@ -373,11 +373,17 @@ The following options are only valid for PRODUCT_TYPE=CADRG.
       Only used when PRODUCT_TYPE=CADRG.
 
 -  .. co:: SCALE
-      :choices: <integer>
       :since: 3.13
 
-      Reciprocal scale to use when generating output frames. Special value GUESS
-      can be used. Valid values are in the range from 1000 (1:1K) to 20000000 (1:20M)
+      Reciprocal scale to use when generating output frames.
+      Valid values are in the range from 1000 (1:1K) to 20000000 (1:20M).
+      Special value ``GUESS`` can be also used to infer the scale from the DPI,
+      either explicitly specified with the DPI creation option, or if the
+      TIFFTAG_YRESOLUTION / TIFFTAG_RESOLUTIONUNIT metadata items exist on the
+      source raster.
+      When not specified, the scale is inferred from the SERIES_CODE value from
+      data series that have a fixed scale. Otherwise it is required.
+
       Only used when PRODUCT_TYPE=CADRG.
 
 -  .. co:: DPI
@@ -385,7 +391,9 @@ The following options are only valid for PRODUCT_TYPE=CADRG.
       :since: 3.13
 
       Dot-Per-Inch value for the input dataset, that may need to be specified
-      together with SCALE. Valid values are in the range from 1 to 7200.
+      together with SCALE=GUESS. Valid values are in the range from 1 to 7200.
+      If SCALE is not specified to the GUESS value, DPI is ignored.
+
       Only used when PRODUCT_TYPE=CADRG.
 
 -  .. co:: ZONE
