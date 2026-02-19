@@ -239,10 +239,6 @@ def test_ogr_geom_polyhedral_surface():
     #        print(wkt_geom)
     #        return 'fail'
 
-    if ogrtest.have_geos():
-        geom = ogr.CreateGeometryFromWkb(wkb_string)
-        assert ps.Contains(geom), "Failure in Contains() of PolyhedralSurface"
-
     assert not ps.IsEmpty(), "Failure in IsEmpty() of PolyhedralSurface"
 
     ps.Empty()

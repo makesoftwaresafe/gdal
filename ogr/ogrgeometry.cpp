@@ -596,7 +596,7 @@ OGRBoolean OGRGeometry::Intersects(const OGRGeometry *poOtherGeom) const
     if (hThisGeosGeom != nullptr && hOtherGeosGeom != nullptr)
     {
         bResult =
-            GEOSIntersects_r(hGEOSCtxt, hThisGeosGeom, hOtherGeosGeom) != 0;
+            GEOSIntersects_r(hGEOSCtxt, hThisGeosGeom, hOtherGeosGeom) == 1;
     }
 
     GEOSGeom_destroy_r(hGEOSCtxt, hThisGeosGeom);
@@ -2327,7 +2327,7 @@ OGRBoolean OGRGeometry::IsValid() const
 
         if (hThisGeosGeom != nullptr)
         {
-            bResult = GEOSisValid_r(hGEOSCtxt, hThisGeosGeom);
+            bResult = GEOSisValid_r(hGEOSCtxt, hThisGeosGeom) == 1;
 #ifdef DEBUG_VERBOSE
             if (!bResult)
             {
@@ -2407,7 +2407,7 @@ OGRBoolean OGRGeometry::IsSimple() const
 
     if (hThisGeosGeom != nullptr)
     {
-        bResult = GEOSisSimple_r(hGEOSCtxt, hThisGeosGeom);
+        bResult = GEOSisSimple_r(hGEOSCtxt, hThisGeosGeom) == 1;
         GEOSGeom_destroy_r(hGEOSCtxt, hThisGeosGeom);
     }
     freeGEOSContext(hGEOSCtxt);
@@ -2478,7 +2478,7 @@ OGRBoolean OGRGeometry::IsRing() const
 
     if (hThisGeosGeom != nullptr)
     {
-        bResult = GEOSisRing_r(hGEOSCtxt, hThisGeosGeom);
+        bResult = GEOSisRing_r(hGEOSCtxt, hThisGeosGeom) == 1;
         GEOSGeom_destroy_r(hGEOSCtxt, hThisGeosGeom);
     }
     freeGEOSContext(hGEOSCtxt);
@@ -3839,7 +3839,8 @@ static OGRBoolean OGRGEOSBooleanPredicate(
     GEOSGeom hOtherGeosGeom = poOtherGeom->exportToGEOS(hGEOSCtxt);
     if (hThisGeosGeom != nullptr && hOtherGeosGeom != nullptr)
     {
-        bResult = pfnGEOSFunction_r(hGEOSCtxt, hThisGeosGeom, hOtherGeosGeom);
+        bResult =
+            pfnGEOSFunction_r(hGEOSCtxt, hThisGeosGeom, hOtherGeosGeom) == 1;
     }
     GEOSGeom_destroy_r(hGEOSCtxt, hThisGeosGeom);
     GEOSGeom_destroy_r(hGEOSCtxt, hOtherGeosGeom);
@@ -3914,7 +3915,7 @@ OGRGeometry *OGRGeometry::MakeValid(CSLConstList papszOptions) const
         GEOSGeom hGeosGeom = exportToGEOS(hGEOSCtxt);
         if (hGeosGeom)
         {
-            bIsValid = GEOSisValid_r(hGEOSCtxt, hGeosGeom);
+            bIsValid = GEOSisValid_r(hGEOSCtxt, hGeosGeom) == 1;
             GEOSGeom_destroy_r(hGEOSCtxt, hGeosGeom);
         }
         freeGEOSContext(hGEOSCtxt);
@@ -7182,9 +7183,10 @@ int OGRPreparedGeometryIntersects(const OGRPreparedGeometryH hPreparedGeom,
     if (hGEOSOtherGeom == nullptr)
         return FALSE;
 
-    const bool bRet = CPL_TO_BOOL(GEOSPreparedIntersects_r(
-        hPreparedGeom->hGEOSCtxt, hPreparedGeom->poPreparedGEOSGeom,
-        hGEOSOtherGeom));
+    const bool bRet =
+        GEOSPreparedIntersects_r(hPreparedGeom->hGEOSCtxt,
+                                 hPreparedGeom->poPreparedGEOSGeom,
+                                 hGEOSOtherGeom) == 1;
     GEOSGeom_destroy_r(hPreparedGeom->hGEOSCtxt, hGEOSOtherGeom);
 
     return bRet;
@@ -7219,9 +7221,9 @@ int OGRPreparedGeometryContains(const OGRPreparedGeometryH hPreparedGeom,
     if (hGEOSOtherGeom == nullptr)
         return FALSE;
 
-    const bool bRet = CPL_TO_BOOL(GEOSPreparedContains_r(
-        hPreparedGeom->hGEOSCtxt, hPreparedGeom->poPreparedGEOSGeom,
-        hGEOSOtherGeom));
+    const bool bRet = GEOSPreparedContains_r(hPreparedGeom->hGEOSCtxt,
+                                             hPreparedGeom->poPreparedGEOSGeom,
+                                             hGEOSOtherGeom) == 1;
     GEOSGeom_destroy_r(hPreparedGeom->hGEOSCtxt, hGEOSOtherGeom);
 
     return bRet;
