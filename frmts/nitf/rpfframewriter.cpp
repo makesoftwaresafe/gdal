@@ -436,12 +436,13 @@ void RPFGetCADRGResolutionAndInterval(int nZone, int nReciprocalScale,
                                       double &lonResolution,
                                       double &latInterval, double &lonInterval)
 {
+    CPLAssert(nReciprocalScale > 0);
     CPLAssert(RPFCADRGIsValidZone(nZone));
     const int nZoneIdx = (nZone - MIN_ZONE) % MAX_ZONE_NORTHERN_HEMISPHERE;
     const auto &sZoneDef = asARCZoneDefinitions[nZoneIdx];
 
     // Cf MIL-A-89007 (ADRG specification), appendix 70, table III
-    const double N = REF_SCALE / nReciprocalScale;
+    const double N = REF_SCALE / std::max(1, nReciprocalScale);
 
     // Cf MIL-C-89038 (CADRG specification), para 60.1.1 and following
     const double B_s = sZoneDef.B * N;
@@ -2702,11 +2703,18 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
                 int nFrameCountThisZone =
                     (frameDef.nFrameMaxY - frameDef.nFrameMinY + 1) *
                     (frameDef.nFrameMaxX - frameDef.nFrameMinX + 1);
+
+#ifdef __COVERITY__
+                // Coverity has false positives about lambda captures by references
+                // being done without the lock being taken
+                CPL_IGNORE_RET_VAL(nFrameCountThisZone);
+#else
                 // Limit to 4 as it doesn't scale beyond
                 const int nNumThreads =
                     std::min(GDALGetNumThreads(/* nMaxThreads = */ 4,
                                                /* bDefaultToAllCPUs = */ true),
                              nFrameCountThisZone);
+
                 CPLJobQueuePtr jobQueue;
                 std::unique_ptr<CPLWorkerThreadPool> poTP;
                 if (nNumThreads > 1)
@@ -2717,7 +2725,7 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
                         jobQueue = poTP->CreateJobQueue();
                     }
                 }
-
+#endif
                 std::mutex oMutex;
                 bool bError = false;
                 bool bErrorLocal = false;
@@ -2805,16 +2813,26 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
                         ++nFrameCountThisZone;
 
                         const auto task =
-                            [osFilename, dfFrameMinX, dfFrameMinY, dfFrameMaxX,
-                             dfFrameMaxY, bFrameFullyInSrcDS, poCT, nRecLevel,
+                            [osFilename = std::move(osFilename), dfFrameMinX,
+                             dfFrameMinY, dfFrameMaxX, dfFrameMaxY,
+                             bFrameFullyInSrcDS, poCT, nRecLevel,
                              nColorQuantizationBits, bStrict,
                              bColorTablePerFrame, &oMutex, &poWarpedDS,
                              &nCurFrameThisZone, &nCurFrameCounter, &bError,
                              &oCT, &aosOptions, &bMissingFramesFound,
                              &osErrorMsg]()
                         {
+#ifdef __COVERITY__
+#define LOCK()                                                                 \
+    do                                                                         \
+    {                                                                          \
+        (void)oMutex;                                                          \
+    } while (0)
+#else
+#define LOCK() std::lock_guard oLock(oMutex)
+#endif
                             {
-                                std::lock_guard oLock(oMutex);
+                                LOCK();
                                 if (bError)
                                     return;
                             }
@@ -2828,7 +2846,7 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
                             std::unique_ptr<GDALDataset> poClippedDS;
                             {
                                 // Lock because poWarpedDS is not thread-safe
-                                std::lock_guard oLock(oMutex);
+                                LOCK();
                                 poClippedDS = CADRGGetClippedDataset(
                                     poWarpedDS.get(), dfFrameMinX, dfFrameMinY,
                                     dfFrameMaxX, dfFrameMaxY);
@@ -2870,7 +2888,7 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
                             }
                             if (!poDS_CADRG)
                             {
-                                std::lock_guard oLock(oMutex);
+                                LOCK();
                                 if (osErrorMsg.empty())
                                     osErrorMsg = CPLGetLastErrorMsg();
                                 bError = true;
@@ -2879,17 +2897,18 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
                             if (dynamic_cast<NITFDummyDataset *>(
                                     poDS_CADRG.get()))
                             {
-                                std::lock_guard oLock(oMutex);
+                                LOCK();
                                 bMissingFramesFound = true;
                             }
                             poDS_CADRG.reset();
                             VSIUnlink((osFilename + ".aux.xml").c_str());
 
-                            std::lock_guard oLock(oMutex);
+                            LOCK();
                             ++nCurFrameThisZone;
                             ++nCurFrameCounter;
                         };
 
+#ifndef __COVERITY__
                         if (jobQueue)
                         {
                             if (!jobQueue->SubmitJob(task))
@@ -2902,6 +2921,7 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
                             }
                         }
                         else
+#endif
                         {
                             task();
                             if (bError)
@@ -2919,6 +2939,7 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
                     }
                 }
 
+#ifndef __COVERITY__
                 if (jobQueue)
                 {
                     while (true)
@@ -2953,6 +2974,7 @@ CADRGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int bStrict,
                         return false;
                     }
                 }
+#endif
             }
 
             const char *pszClassification =

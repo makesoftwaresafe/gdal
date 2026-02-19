@@ -461,13 +461,13 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
                             sum3 += val3MulCount;
                             // It's fine to cast to int64 after multiplication
                             sumSquare0 +=
-                                static_cast<int64_t>(val0 * val0MulCount);
+                                cpl::fits_on<int64_t>(val0 * val0MulCount);
                             sumSquare1 +=
-                                static_cast<int64_t>(val1 * val1MulCount);
+                                cpl::fits_on<int64_t>(val1 * val1MulCount);
                             sumSquare2 +=
-                                static_cast<int64_t>(val2 * val2MulCount);
+                                cpl::fits_on<int64_t>(val2 * val2MulCount);
                             sumSquare3 +=
-                                static_cast<int64_t>(val3 * val3MulCount);
+                                cpl::fits_on<int64_t>(val3 * val3MulCount);
                         }
 
                         const double M2[] = {
@@ -651,6 +651,8 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
                                  queueNodes, vectors, vectTmp, ctxt);
     int retRight = m_right->insert(std::move(vectRight), countRight, vals,
                                    queueNodes, vectors, vectTmp, ctxt);
+    vectLeft = std::vector<BucketItem<T>>();
+    vectRight = std::vector<BucketItem<T>>();
     return (retLeft == 0 || retRight == 0) ? 0 : retLeft + retRight;
 }
 
@@ -1007,6 +1009,7 @@ int PNNKDTree<T>::rebalance(const T &ctxt,
         totalTimeRebalancing += (tv2.tv_sec + tv2.tv_usec * 1e-6) -
                                 (tv1.tv_sec + tv1.tv_usec * 1e-6);
 #endif
+        newLeaves = std::vector<BucketItem<T>>();
         return ret;
     }
     else

@@ -65,7 +65,11 @@ template <class T> T square(T x)
 template <typename T, std::size_t N>
 constexpr std::array<T, N> filled_array(const T &value)
 {
+#ifdef __COVERITY__
+    std::array<T, N> a{};
+#else
     std::array<T, N> a;
+#endif
     for (auto &x : a)
         x = value;
     return a;
