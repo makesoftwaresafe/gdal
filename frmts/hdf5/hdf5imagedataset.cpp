@@ -25,6 +25,7 @@
 #include "memdataset.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 
@@ -54,9 +55,8 @@ class HDF5ImageDataset final : public HDF5Dataset
 
     hsize_t *dims;
     hsize_t *maxdims;
-    HDF5GroupObjects *poH5Objects;
     int ndims;
-    int dimensions;
+    std::string m_osPath{};
     hid_t dataset_id;
     hid_t dataspace_id;
     hid_t native;
@@ -198,10 +198,9 @@ class HDF5ImageDataset final : public HDF5Dataset
 /*                          HDF5ImageDataset()                          */
 /************************************************************************/
 HDF5ImageDataset::HDF5ImageDataset()
-    : dims(nullptr), maxdims(nullptr), poH5Objects(nullptr), ndims(0),
-      dimensions(0), dataset_id(-1), dataspace_id(-1), native(-1),
-      iSubdatasetType(UNKNOWN_PRODUCT), iCSKProductType(PROD_UNKNOWN),
-      bHasGeoTransform(false)
+    : dims(nullptr), maxdims(nullptr), ndims(0), dataset_id(-1),
+      dataspace_id(-1), native(-1), iSubdatasetType(UNKNOWN_PRODUCT),
+      iCSKProductType(PROD_UNKNOWN), bHasGeoTransform(false)
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     m_oGCPSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
@@ -1027,16 +1026,17 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->ReadGlobalAttributes(FALSE);
 
     // Create HDF5 Data Hierarchy in a link list.
-    poDS->poH5Objects = poDS->HDF5FindDatasetObjectsbyPath(poDS->poH5RootGroup,
-                                                           osSubdatasetName);
+    HDF5GroupObjects *poH5Objects = poDS->HDF5FindDatasetObjectsbyPath(
+        poDS->poH5RootGroup, osSubdatasetName);
 
-    if (poDS->poH5Objects == nullptr)
+    if (poH5Objects == nullptr)
     {
         return nullptr;
     }
 
     // Retrieve HDF5 data information.
-    poDS->dataset_id = H5Dopen(poDS->m_hHDF5, poDS->poH5Objects->pszPath);
+    poDS->m_osPath = poH5Objects->pszPath;
+    poDS->dataset_id = H5Dopen(poDS->m_hHDF5, poH5Objects->pszPath);
     poDS->dataspace_id = H5Dget_space(poDS->dataset_id);
     poDS->ndims = H5Sget_simple_extent_ndims(poDS->dataspace_id);
     if (poDS->ndims <= 0)
@@ -1047,9 +1047,12 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
         static_cast<hsize_t *>(CPLCalloc(poDS->ndims, sizeof(hsize_t)));
     poDS->maxdims =
         static_cast<hsize_t *>(CPLCalloc(poDS->ndims, sizeof(hsize_t)));
-    poDS->dimensions = H5Sget_simple_extent_dims(poDS->dataspace_id, poDS->dims,
-                                                 poDS->maxdims);
-    for (int i = 0; i < poDS->dimensions; ++i)
+    if (H5Sget_simple_extent_dims(poDS->dataspace_id, poDS->dims,
+                                  poDS->maxdims) != poDS->ndims)
+    {
+        return nullptr;
+    }
+    for (int i = 0; i < poDS->ndims; ++i)
     {
         if (poDS->dims[i] >
             static_cast<hsize_t>(std::numeric_limits<int>::max()))
@@ -1197,10 +1200,10 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
 
     CPLStringList aosMetadata;
     std::map<std::string, CPLStringList> oMapBandSpecificMetadata;
-    if (poDS->poH5Objects->nType == H5G_DATASET)
+    if (poH5Objects->nType == H5G_DATASET)
     {
-        HDF5Dataset::CreateMetadata(poDS->m_hHDF5, poDS->poH5Objects,
-                                    H5G_DATASET, false, aosMetadata);
+        HDF5Dataset::CreateMetadata(poDS->m_hHDF5, poH5Objects, H5G_DATASET,
+                                    false, aosMetadata);
         if (nBands > 1 && poDS->nRasterXSize != nBands &&
             poDS->nRasterYSize != nBands)
         {
@@ -1313,7 +1316,7 @@ GDALDataset *HDF5ImageDataset::Open(GDALOpenInfo *poOpenInfo)
         auto poBand = std::make_unique<HDF5ImageRasterBand>(poDS.get(), i + 1,
                                                             eGDALDataType);
 
-        if (poDS->poH5Objects->nType == H5G_DATASET)
+        if (poH5Objects->nType == H5G_DATASET)
         {
             poBand->SetMetadata(aosMetadata.List());
             for (const auto &oIter : oMapBandSpecificMetadata)
@@ -1515,6 +1518,152 @@ CPLErr HDF5ImageDataset::CreateProjections()
         }
         case UNKNOWN_PRODUCT:
         {
+            if (ndims == 2)
+            {
+                // Check if there's a CF conventions grid_mapping attribute.
+                const char *pszGridMapping =
+                    GetRasterBand(1)->GetMetadataItem("grid_mapping");
+                if (pszGridMapping)
+                {
+                    const std::string osGroupName =
+                        CPLGetDirnameSafe(m_osPath.c_str());
+                    HDF5GroupObjects *poH5Objects =
+                        HDF5FindDatasetObjectsbyPath(
+                            poH5RootGroup,
+                            (osGroupName + "/" + pszGridMapping).c_str());
+                    if (poH5Objects && poH5Objects->nType == H5G_DATASET)
+                    {
+                        CPLStringList aosMetadata;
+                        CreateMetadata(m_hHDF5, poH5Objects, H5G_DATASET, false,
+                                       aosMetadata);
+
+                        // NISAR specific
+                        const int nEPSGCode = atoi(
+                            aosMetadata.FetchNameValueDef("epsg_code", "0"));
+                        if (nEPSGCode > 0)
+                        {
+                            if (m_oSRS.importFromEPSG(nEPSGCode) != OGRERR_NONE)
+                            {
+                                m_oSRS.Clear();
+                            }
+                        }
+                        else
+                        {
+                            if (m_oSRS.importFromCF1(
+                                    aosMetadata.List(),
+                                    /* pszUnits = */ nullptr) != OGRERR_NONE)
+                            {
+                                m_oSRS.Clear();
+                            }
+                        }
+                    }
+                }
+
+                // NISAR Level 2 specific
+                const char *pszMissionName = GetMetadataItem("mission_name");
+                if (pszMissionName && EQUAL(pszMissionName, "NISAR"))
+                {
+                    const std::string osGroupName =
+                        CPLGetDirnameSafe(m_osPath.c_str());
+                    HDF5GroupObjects *poXCoordinates =
+                        HDF5FindDatasetObjectsbyPath(
+                            poH5RootGroup,
+                            (osGroupName + "/xCoordinates").c_str());
+                    HDF5GroupObjects *poYCoordinates =
+                        HDF5FindDatasetObjectsbyPath(
+                            poH5RootGroup,
+                            (osGroupName + "/yCoordinates").c_str());
+                    if (poXCoordinates && poYCoordinates &&
+                        poXCoordinates->nType == H5G_DATASET &&
+                        poYCoordinates->nType == H5G_DATASET &&
+                        poXCoordinates->nRank == 1 &&
+                        poYCoordinates->nRank == 1 &&
+                        H5Tequal(H5T_NATIVE_DOUBLE, poXCoordinates->native) &&
+                        H5Tequal(H5T_NATIVE_DOUBLE, poYCoordinates->native) &&
+                        poXCoordinates->paDims[0] == dims[1] &&
+                        poYCoordinates->paDims[0] == dims[0])
+                    {
+                        hid_t hDSX = H5Dopen(m_hHDF5, poXCoordinates->pszPath);
+                        hid_t hDSY = H5Dopen(m_hHDF5, poYCoordinates->pszPath);
+
+                        if (hDSX >= 0 && hDSY >= 0)
+                        {
+                            const auto Read1DDoubleArray =
+                                [](hid_t hDS, hsize_t count,
+                                   std::vector<double> &v)
+                            {
+                                hsize_t anCount[1] = {count};
+                                hsize_t anStart[1] = {0};
+                                v.resize(static_cast<size_t>(count));
+                                hid_t hMem =
+                                    H5Screate_simple(1, anCount, nullptr);
+                                const hid_t hDataspace = H5Dget_space(hDS);
+                                H5Sselect_hyperslab(hDataspace, H5S_SELECT_SET,
+                                                    anStart, nullptr, anCount,
+                                                    nullptr);
+                                bool ret = H5Dread(hDS, H5T_NATIVE_DOUBLE, hMem,
+                                                   hDataspace, H5P_DEFAULT,
+                                                   v.data()) >= 0;
+                                H5Sclose(hDataspace);
+                                H5Sclose(hMem);
+                                return ret;
+                            };
+
+                            std::vector<double> adfX, adfY;
+                            if (Read1DDoubleArray(
+                                    hDSX, poXCoordinates->paDims[0], adfX) &&
+                                Read1DDoubleArray(
+                                    hDSY, poYCoordinates->paDims[0], adfY) &&
+                                adfX.size() >= 3 && adfY.size() >= 3)
+                            {
+                                constexpr double EPSILON = 1e-3;
+                                double dfXSpacing = adfX[1] - adfX[0];
+                                for (size_t i = 1; i + 1 < adfX.size(); ++i)
+                                {
+                                    const double dfDelta =
+                                        adfX[i + 1] - adfX[i];
+                                    if (!(std::fabs(dfDelta - dfXSpacing) <=
+                                          EPSILON * std::fabs(dfXSpacing)))
+                                    {
+                                        dfXSpacing = std::numeric_limits<
+                                            double>::quiet_NaN();
+                                        break;
+                                    }
+                                }
+
+                                double dfYSpacing = adfY[1] - adfY[0];
+                                for (size_t i = 1; i + 1 < adfY.size(); ++i)
+                                {
+                                    const double dfDelta =
+                                        adfY[i + 1] - adfY[i];
+                                    if (!(std::fabs(dfDelta - dfYSpacing) <=
+                                          EPSILON * std::fabs(dfYSpacing)))
+                                    {
+                                        dfYSpacing = std::numeric_limits<
+                                            double>::quiet_NaN();
+                                        break;
+                                    }
+                                }
+
+                                if (!std::isnan(dfXSpacing) &&
+                                    !std::isnan(dfYSpacing))
+                                {
+                                    bHasGeoTransform = true;
+                                    m_gt.xorig = adfX[0] - dfXSpacing / 2;
+                                    m_gt.xscale = dfXSpacing;
+                                    m_gt.yorig = adfY[0] - dfYSpacing / 2;
+                                    m_gt.yscale = dfYSpacing;
+                                }
+                            }
+                        }
+                        if (hDSX >= 0)
+                            H5Dclose(hDSX);
+                        if (hDSY >= 0)
+                            H5Dclose(hDSY);
+                    }
+                }
+            }
+
             constexpr int NBGCPLAT = 100;
             constexpr int NBGCPLON = 30;
 
@@ -1525,7 +1674,8 @@ CPLErr HDF5ImageDataset::CreateProjections()
                 return CE_None;
 
             // Create HDF5 Data Hierarchy in a link list.
-            poH5Objects = HDF5FindDatasetObjects(poH5RootGroup, "Latitude");
+            HDF5GroupObjects *poH5Objects =
+                HDF5FindDatasetObjects(poH5RootGroup, "Latitude");
             if (!poH5Objects)
             {
                 if (GetMetadataItem("where_projdef") != nullptr)
