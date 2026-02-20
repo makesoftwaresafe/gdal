@@ -377,3 +377,8 @@ for Bosnia and Herzegovina (country code "BA"), limited to the "county" subtype.
                 (1, 2, "metres"),
             {"depth", "depth", "metres", "1000000", "H5T_FLOAT",
             {"uncertainty", "uncertainty", "metres", "1000000", "H5T_FLOAT",
+    CPLString osIndexsNomsCamps = "1";
+        osIndexsNomsCamps.append(osIndex);
+    AddKeyValue(Key_IndexesNomsCamps, osIndexsNomsCamps);
+        AddKeyValue("IndexsJoinTaula", osIJT);
+    osSectionIn.append(":INOUT");

@@ -1150,7 +1150,7 @@ bool MMRRel::Write(GDALDataset &oSrcDS)
     // Writing IDENTIFICATION section
     WriteIDENTIFICATION();
 
-    // Writting OVERVIEW:ASPECTES_TECNICS
+    // Writing OVERVIEW:ASPECTES_TECNICS
     WriteOVERVIEW_ASPECTES_TECNICS(oSrcDS);
 
     // Writing SPATIAL_REFERENCE_SYSTEM:HORIZONTAL
@@ -1434,13 +1434,13 @@ void MMRRel::WriteBandSection(const MMRBand &osBand,
     if (!EQUAL(osDSDataType, osDataType))
         AddKeyValue("TipusCompressio", osDataType);
 
-    // TractamentVariable of the band (only written if diferent from default)
+    // TractamentVariable of the band (only written if different from default)
     CPLString osTractVariable =
         osBand.IsCategorical() ? "Categoric" : "QuantitatiuContinu";
     if (!EQUAL(m_osDefTractVariable, osTractVariable))
         AddKeyValue(KEY_TractamentVariable, osTractVariable);
 
-    // Units of the band (only written if diferent from default)
+    // Units of the band (only written if different from default)
     CPLString osUnits = osBand.GetUnits();
     if (!EQUAL(m_osDefUnits, osUnits))
     {

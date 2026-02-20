@@ -252,8 +252,8 @@ MMRBand::MMRBand(GDALProgressFunc pfnProgress, void *pProgressData,
     {
         m_osCTName.clear();
         CPLError(CE_Warning, CPLE_AppDefined,
-                 "MMRBand::MMRBand : Existant color table but not imported"
-                 "due to some existant errors");
+                 "MMRBand::MMRBand : Existent color table but not imported"
+                 "due to some existent errors");
     }
 
     if (WriteAttributeTable(oSrcDS))
@@ -261,8 +261,8 @@ MMRBand::MMRBand(GDALProgressFunc pfnProgress, void *pProgressData,
         m_osRATDBFName.clear();
         m_osRATRELName.clear();
         CPLError(CE_Warning, CPLE_AppDefined,
-                 "MMRBand::MMRBand : Existant attribute table but not imported "
-                 "due to some existant errors");
+                 "MMRBand::MMRBand : Existent attribute table but not imported "
+                 "due to some existent errors");
     }
 
     // We have a valid MMRBand.
@@ -1358,8 +1358,8 @@ bool MMRBand::WriteRowOffsets()
     if (VSIFWriteL(&nAux, 4, 1, m_pfIMG) != 1)
         return false;
 
-    vsi_l_offset nUnusefulOffset = 0;
-    if (VSIFWriteL(&nUnusefulOffset, sizeof(vsi_l_offset), 1, m_pfIMG) != 1)
+    vsi_l_offset nUselessOffset = 0;
+    if (VSIFWriteL(&nUselessOffset, sizeof(vsi_l_offset), 1, m_pfIMG) != 1)
         return false;
 
     // The main part
@@ -1712,13 +1712,13 @@ bool MMRBand::WriteBandFile(GDALDataset &oSrcDS, int nNBands, int nIBand)
     VSIFree(pBuffer);
     VSIFree(pRow);
 
-    // Udating min and max values for simbolization
+    // Updating min and max values for simbolization
     m_dfVisuMin = m_dfMin;
     m_bMinVisuSet = m_bMinSet;
     m_dfVisuMax = m_dfMax;
     m_bMaxVisuSet = m_bMaxSet;
 
-    // There is a final part that contain the indexs to every row
+    // There is a final part that contain the indexes to every row
     if (m_bIsCompressed)
     {
         if (WriteRowOffsets() == false)
@@ -1947,7 +1947,7 @@ int MMRBand::WriteColorTable(GDALDataset &oSrcDS)
         return 1;
     }
 
-    // Writting records to the table
+    // Writing records to the table
     if (0 != VSIFSeekL(pBD_XP->pfDataBase,
                        static_cast<vsi_l_offset>(pBD_XP->FirstRecordOffset),
                        SEEK_SET))
@@ -2098,7 +2098,7 @@ int MMRBand::WriteColorTableFromRAT(GDALDataset &oSrcDS)
         return 1;
     }
 
-    // Writting records to the table
+    // Writing records to the table
     if (0 != VSIFSeekL(pBD_XP->pfDataBase,
                        static_cast<vsi_l_offset>(pBD_XP->FirstRecordOffset),
                        SEEK_SET))
@@ -2358,7 +2358,7 @@ int MMRBand::WriteAttributeTable(GDALDataset &oSrcDS)
         return 1;
     }
 
-    // Writting records to the table
+    // Writing records to the table
     if (0 != VSIFSeekL(pBD_XP->pfDataBase,
                        static_cast<vsi_l_offset>(pBD_XP->FirstRecordOffset),
                        SEEK_SET))

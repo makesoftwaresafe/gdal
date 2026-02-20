@@ -479,11 +479,11 @@ class MMRBand final
     // Field in the table that is used as VALUE
     CPLString m_osAssociateREL = "";
 
-    // Color table in writting part of the driver
+    // Color table in writing part of the driver
     GDALColorTable *m_poCT = nullptr;
     CPLString m_osCTName = "";
 
-    // Attributte table in writting part of the driver
+    // Attributte table in writing part of the driver
     GDALRasterAttributeTable *m_poRAT = nullptr;
     CPLString m_osRATDBFName = "";
     CPLString m_osRATRELName = "";
