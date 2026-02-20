@@ -229,7 +229,7 @@ template <class T> class PNNKDTree
     int insert(std::vector<BucketItem<T>> &&vectors, const T &ctxt);
 
     /** Iterate over leaf nodes (that contain buckets) */
-    void iterateOverLeaves(std::function<void(PNNKDTree &)> f);
+    void iterateOverLeaves(const std::function<void(PNNKDTree &)> &f);
 
     /** Perform clustering to reduce the number of buckets from initialBucketCount
      * to targetCount.
@@ -661,7 +661,7 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
 /************************************************************************/
 
 template <class T>
-void PNNKDTree<T>::iterateOverLeaves(std::function<void(PNNKDTree &)> f)
+void PNNKDTree<T>::iterateOverLeaves(const std::function<void(PNNKDTree &)> &f)
 {
     if (m_left && m_right)
     {
