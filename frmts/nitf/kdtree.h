@@ -156,8 +156,9 @@ template <class T> class Vector
     /** Computes a new vector that is the centroid of vector a of weight nA,
      * and vector b of weight nB.
      */
-    static Vector centroid(const Vector &a, int nA, const Vector &b, int nB,
-                           const T &ctxt) /* = 0 */;
+    template <typename CountType>
+    static Vector centroid(const Vector &a, CountType nA, const Vector &b,
+                           CountType nB, const T &ctxt) /* = 0 */;
 };
 
 /************************************************************************/
@@ -168,7 +169,7 @@ template <class T> class Vector
  *
  * This class does not need to be specialized.
  */
-template <class T> struct BucketItem
+template <class T, typename CountTypeIn> struct BucketItem
 {
   public:
     /** Value vector */
@@ -185,11 +186,14 @@ template <class T> struct BucketItem
      */
     std::vector<IdxType> m_origVectorIndices;
 
+    /** Type of m_count */
+    using CountType = CountTypeIn;
+
     /** Number of samples that have the value of m_vec */
-    int m_count;
+    CountType m_count;
 
     /** Constructor */
-    BucketItem(const Vector<T> &vec, int count,
+    BucketItem(const Vector<T> &vec, CountType count,
                std::vector<IdxType> &&origVectorIndices)
         : m_vec(vec), m_origVectorIndices(std::move(origVectorIndices)),
           m_count(count)
@@ -214,8 +218,10 @@ template <class T> struct BucketItem
  *
  * This class does not need to be specialized.
  */
-template <class T> class PNNKDTree
+template <class T, typename CountTypeIn = int> class PNNKDTree
 {
+    using CountType = CountTypeIn;
+
   public:
     PNNKDTree() = default;
 
@@ -226,7 +232,7 @@ template <class T> class PNNKDTree
      * Returns the initial count of buckets, that must be passed as an input
      * to cluster().
      */
-    int insert(std::vector<BucketItem<T>> &&vectors, const T &ctxt);
+    int insert(std::vector<BucketItem<T, CountType>> &&vectors, const T &ctxt);
 
     /** Iterate over leaf nodes (that contain buckets) */
     void iterateOverLeaves(const std::function<void(PNNKDTree &)> &f);
@@ -240,13 +246,13 @@ template <class T> class PNNKDTree
     int cluster(int initialBucketCount, int targetCount, const T &ctxt);
 
     /** Returns the bucket items for this node. */
-    inline const std::vector<BucketItem<T>> &bucketItems() const
+    inline const std::vector<BucketItem<T, CountType>> &bucketItems() const
     {
         return m_bucketItems;
     }
 
     /** Returns the bucket items for this node. */
-    inline std::vector<BucketItem<T>> &bucketItems()
+    inline std::vector<BucketItem<T, CountType>> &bucketItems()
     {
         return m_bucketItems;
     }
@@ -265,7 +271,7 @@ template <class T> class PNNKDTree
      *
      * m_bucketItems is non empty only on leaf nodes.
      */
-    std::vector<BucketItem<T>> m_bucketItems{};
+    std::vector<BucketItem<T, CountType>> m_bucketItems{};
 
     /** Data type returned by Vector<T>::get() */
     using ValType = decltype(std::declval<Vector<T>>().get(
@@ -277,39 +283,44 @@ template <class T> class PNNKDTree
      */
     void freeAndMoveToQueue(std::deque<std::unique_ptr<PNNKDTree>> &queueNodes);
 
-    int insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
-               std::vector<std::pair<ValType, int>> &weightedVals,
+    int insert(std::vector<BucketItem<T, CountType>> &&vectors,
+               CountType totalCount,
+               std::vector<std::pair<ValType, CountType>> &weightedVals,
                std::deque<std::unique_ptr<PNNKDTree>> &queueNodes,
-               std::vector<BucketItem<T>> &vectLeft,
-               std::vector<BucketItem<T>> &vectRight, const T &ctxt);
+               std::vector<BucketItem<T, CountType>> &vectLeft,
+               std::vector<BucketItem<T, CountType>> &vectRight, const T &ctxt);
 
     /** Rebalance the KD-Tree. Current implementation fully rebuilds a new
      * KD-Tree using the insert() algorithm
      */
-    int rebalance(const T &ctxt, std::vector<BucketItem<T>> &newLeaves,
+    int rebalance(const T &ctxt,
+                  std::vector<BucketItem<T, CountType>> &newLeaves,
                   std::deque<std::unique_ptr<PNNKDTree>> &queueNodes);
 };
 
 /************************************************************************/
-/*                        PNNKDTree<T>::insert()                        */
+/*                  PNNKDTree<T, CountType>::insert()                   */
 /************************************************************************/
 
-template <class T>
-int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, const T &ctxt)
+template <class T, typename CountType>
+int PNNKDTree<T, CountType>::insert(
+    std::vector<BucketItem<T, CountType>> &&vectors, const T &ctxt)
 {
     assert(m_left == nullptr);
     assert(m_right == nullptr);
     assert(m_bucketItems.empty());
 
-    int totalCount = 0;
+    CountType totalCount = 0;
     for (const auto &it : vectors)
     {
+        CPLAssert(totalCount <=
+                  std::numeric_limits<CountType>::max() - it.m_count);
         totalCount += it.m_count;
     }
-    std::vector<std::pair<ValType, int>> weightedVals;
+    std::vector<std::pair<ValType, CountType>> weightedVals;
     std::deque<std::unique_ptr<PNNKDTree>> queueNodes;
-    std::vector<BucketItem<T>> vectLeft;
-    std::vector<BucketItem<T>> vectRight;
+    std::vector<BucketItem<T, CountType>> vectLeft;
+    std::vector<BucketItem<T, CountType>> vectRight;
     if (totalCount == 0)
         return 0;
     return insert(std::move(vectors), totalCount, weightedVals, queueNodes,
@@ -317,15 +328,16 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, const T &ctxt)
 }
 
 /************************************************************************/
-/*                        PNNKDTree<T>::insert()                        */
+/*                  PNNKDTree<T, CountType>::insert()                   */
 /************************************************************************/
 
-template <class T>
-int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
-                         std::vector<std::pair<ValType, int>> &weightedVals,
-                         std::deque<std::unique_ptr<PNNKDTree>> &queueNodes,
-                         std::vector<BucketItem<T>> &vectLeft,
-                         std::vector<BucketItem<T>> &vectRight, const T &ctxt)
+template <class T, typename CountType>
+int PNNKDTree<T, CountType>::insert(
+    std::vector<BucketItem<T, CountType>> &&vectors, CountType totalCount,
+    std::vector<std::pair<ValType, CountType>> &weightedVals,
+    std::deque<std::unique_ptr<PNNKDTree>> &queueNodes,
+    std::vector<BucketItem<T, CountType>> &vectLeft,
+    std::vector<BucketItem<T, CountType>> &vectRight, const T &ctxt)
 {
 #ifdef DEBUG_INVARIANTS
     std::map<Vector<T>, int> mapValuesToBucketIdx;
@@ -354,7 +366,8 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
 
     for (int k = 0; k < Vector<T>::DIM_COUNT; ++k)
     {
-        if constexpr (Vector<T>::getReturnUInt8)
+        if constexpr (Vector<T>::getReturnUInt8 &&
+                      std::is_same_v<CountType, int>)
         {
             constexpr int MAX_BYTE_VALUE = std::numeric_limits<uint8_t>::max();
             bool canUseOptimization =
@@ -528,7 +541,8 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
         double sum = 0;
         for (const auto &item : vectors)
         {
-            sum += static_cast<double>(item.m_vec.get(k, ctxt)) * item.m_count;
+            sum += static_cast<double>(item.m_vec.get(k, ctxt)) *
+                   static_cast<double>(item.m_count);
         }
         const double mean = sum / totalCount;
         // Second pass to compute M2 value (n * variance) along k(th) dimension
@@ -537,7 +551,7 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
         {
             const double delta =
                 static_cast<double>(item.m_vec.get(k, ctxt)) - mean;
-            M2 += delta * delta * item.m_count;
+            M2 += delta * delta * static_cast<double>(item.m_count);
         }
         if (M2 > maxM2)
         {
@@ -565,8 +579,8 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
               [](const auto &a, const auto &b) { return a.first < b.first; });
 
     auto median = weightedVals[0].first;
-    int cumulativeCount = 0;
-    const int targetCount = totalCount / 2;
+    CountType cumulativeCount = 0;
+    const CountType targetCount = totalCount / 2;
     for (const auto &[value, count] : weightedVals)
     {
         cumulativeCount += count;
@@ -583,8 +597,8 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
     vectLeft.reserve(weightedVals.size() / 2);
     vectRight.clear();
     vectRight.reserve(weightedVals.size() / 2);
-    int countLeft = 0;
-    int countRight = 0;
+    CountType countLeft = 0;
+    CountType countRight = 0;
     for (auto &item : vectors)
     {
         if (item.m_vec.get(maxM2_k, ctxt) <= median)
@@ -643,7 +657,7 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
         queueNodes.pop_back();
     }
     else
-        m_left = std::make_unique<PNNKDTree<T>>();
+        m_left = std::make_unique<PNNKDTree<T, CountType>>();
 
     if (!queueNodes.empty())
     {
@@ -651,12 +665,13 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
         queueNodes.pop_back();
     }
     else
-        m_right = std::make_unique<PNNKDTree<T>>();
+        m_right = std::make_unique<PNNKDTree<T, CountType>>();
 
     // Recursively insert vectLeft in m_left and vectRight in m_right
-    std::vector<BucketItem<T>> vectTmp;
+    std::vector<BucketItem<T, CountType>> vectTmp;
     // Sort for replicability of results across platforms
-    const auto sortFunc = [](const BucketItem<T> &a, const BucketItem<T> &b)
+    const auto sortFunc =
+        [](const BucketItem<T, CountType> &a, const BucketItem<T, CountType> &b)
     { return a.m_vec < b.m_vec; };
     std::sort(vectLeft.begin(), vectLeft.end(), sortFunc);
     std::sort(vectRight.begin(), vectRight.end(), sortFunc);
@@ -665,17 +680,18 @@ int PNNKDTree<T>::insert(std::vector<BucketItem<T>> &&vectors, int totalCount,
     int retRight =
         m_right->insert(std::move(vectRight), countRight, weightedVals,
                         queueNodes, vectors, vectTmp, ctxt);
-    vectLeft = std::vector<BucketItem<T>>();
-    vectRight = std::vector<BucketItem<T>>();
+    vectLeft = std::vector<BucketItem<T, CountType>>();
+    vectRight = std::vector<BucketItem<T, CountType>>();
     return (retLeft == 0 || retRight == 0) ? 0 : retLeft + retRight;
 }
 
 /************************************************************************/
-/*                  PNNKDTree<T>::iterateOverLeaves()                   */
+/*             PNNKDTree<T, CountType>::iterateOverLeaves()             */
 /************************************************************************/
 
-template <class T>
-void PNNKDTree<T>::iterateOverLeaves(const std::function<void(PNNKDTree &)> &f)
+template <class T, typename CountType>
+void PNNKDTree<T, CountType>::iterateOverLeaves(
+    const std::function<void(PNNKDTree &)> &f)
 {
     if (m_left && m_right)
     {
@@ -689,16 +705,16 @@ void PNNKDTree<T>::iterateOverLeaves(const std::function<void(PNNKDTree &)> &f)
 }
 
 /************************************************************************/
-/*                       PNNKDTree<T>::cluster()                        */
+/*                  PNNKDTree<T, CountType>::cluster()                  */
 /************************************************************************/
 
-template <class T>
-int PNNKDTree<T>::cluster(int initialBucketCount, int targetCount,
-                          const T &ctxt)
+template <class T, typename CountType>
+int PNNKDTree<T, CountType>::cluster(int initialBucketCount, int targetCount,
+                                     const T &ctxt)
 {
     int curBucketCount = initialBucketCount;
 
-    std::vector<BucketItem<T>> newLeaves;
+    std::vector<BucketItem<T, CountType>> newLeaves;
     newLeaves.reserve(initialBucketCount);
     std::deque<std::unique_ptr<PNNKDTree>> queueNodes;
 
@@ -752,8 +768,10 @@ int PNNKDTree<T>::cluster(int initialBucketCount, int targetCount,
                                     bucket.m_bucketItems[j + subj];
                                 const double increasedDistortion =
                                     static_cast<double>(itemI.m_count) *
-                                    itemJ.m_count * tabSquaredDist[subj] /
-                                    (itemI.m_count + itemJ.m_count);
+                                    static_cast<double>(itemJ.m_count) *
+                                    tabSquaredDist[subj] /
+                                    static_cast<double>(itemI.m_count +
+                                                        itemJ.m_count);
                                 TupleInfo ti;
                                 ti.bucket = &bucket;
                                 ti.i = i;
@@ -769,9 +787,10 @@ int PNNKDTree<T>::cluster(int initialBucketCount, int targetCount,
                     {
                         const auto &itemJ = bucket.m_bucketItems[j];
                         const double increasedDistortion =
-                            static_cast<double>(itemI.m_count) * itemJ.m_count *
+                            static_cast<double>(itemI.m_count) *
+                            static_cast<double>(itemJ.m_count) *
                             itemI.m_vec.squared_distance(itemJ.m_vec, ctxt) /
-                            (itemI.m_count + itemJ.m_count);
+                            static_cast<double>(itemI.m_count + itemJ.m_count);
                         TupleInfo ti;
                         ti.bucket = &bucket;
                         ti.i = i;
@@ -872,7 +891,7 @@ int PNNKDTree<T>::cluster(int initialBucketCount, int targetCount,
                 }
             }
             oIter->second |= ((1U << tupleInfo.i) | (1U << tupleInfo.j));
-            int newCount = bucketItemI.m_count + bucketItemJ.m_count;
+            CountType newCount = bucketItemI.m_count + bucketItemJ.m_count;
             if (bucketItemIdx >= 0 && bucketItemIdx != tupleInfo.i &&
                 bucketItemIdx != tupleInfo.j)
             {
@@ -935,11 +954,11 @@ int PNNKDTree<T>::cluster(int initialBucketCount, int targetCount,
 }
 
 /************************************************************************/
-/*                  PNNKDTree<T>::freeAndMoveToQueue()                  */
+/*            PNNKDTree<T, CountType>::freeAndMoveToQueue()             */
 /************************************************************************/
 
-template <class T>
-void PNNKDTree<T>::freeAndMoveToQueue(
+template <class T, typename CountType>
+void PNNKDTree<T, CountType>::freeAndMoveToQueue(
     std::deque<std::unique_ptr<PNNKDTree>> &queueNodes)
 {
     m_bucketItems.clear();
@@ -956,13 +975,13 @@ void PNNKDTree<T>::freeAndMoveToQueue(
 }
 
 /************************************************************************/
-/*                      PNNKDTree<T>::rebalance()                       */
+/*                 PNNKDTree<T, CountType>::rebalance()                 */
 /************************************************************************/
 
-template <class T>
-int PNNKDTree<T>::rebalance(const T &ctxt,
-                            std::vector<BucketItem<T>> &newLeaves,
-                            std::deque<std::unique_ptr<PNNKDTree>> &queueNodes)
+template <class T, typename CountType>
+int PNNKDTree<T, CountType>::rebalance(
+    const T &ctxt, std::vector<BucketItem<T, CountType>> &newLeaves,
+    std::deque<std::unique_ptr<PNNKDTree>> &queueNodes)
 {
     if (m_left && m_right)
     {
@@ -970,10 +989,12 @@ int PNNKDTree<T>::rebalance(const T &ctxt,
         struct timeval tv1, tv2;
         gettimeofday(&tv1, nullptr);
 #endif
-        std::map<Vector<T>,
-                 std::pair<int, std::vector<typename BucketItem<T>::IdxType>>>
+        std::map<
+            Vector<T>,
+            std::pair<CountType,
+                      std::vector<typename BucketItem<T, CountType>::IdxType>>>
             mapVectors;
-        int totalCount = 0;
+        CountType totalCount = 0;
         // Rebuild a new map of vector values -> (count, indices)
         // This needs to be a map as we cannot guarantee the uniqueness
         // of vector values after the clustering pass
@@ -1012,9 +1033,9 @@ int PNNKDTree<T>::rebalance(const T &ctxt,
                                    std::move(value.second));
         }
 
-        std::vector<std::pair<ValType, int>> weightedVals;
-        std::vector<BucketItem<T>> vectLeft;
-        std::vector<BucketItem<T>> vectRight;
+        std::vector<std::pair<ValType, CountType>> weightedVals;
+        std::vector<BucketItem<T, CountType>> vectLeft;
+        std::vector<BucketItem<T, CountType>> vectRight;
         const int ret = insert(std::move(newLeaves), totalCount, weightedVals,
                                queueNodes, vectLeft, vectRight, ctxt);
 #ifdef KDTREE_DEBUG_TIMING
@@ -1022,7 +1043,7 @@ int PNNKDTree<T>::rebalance(const T &ctxt,
         totalTimeRebalancing += (tv2.tv_sec + tv2.tv_usec * 1e-6) -
                                 (tv1.tv_sec + tv1.tv_usec * 1e-6);
 #endif
-        newLeaves = std::vector<BucketItem<T>>();
+        newLeaves = std::vector<BucketItem<T, CountType>>();
         return ret;
     }
     else

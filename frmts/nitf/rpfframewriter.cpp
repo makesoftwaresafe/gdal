@@ -132,7 +132,7 @@ bool RPFCADRGIsKnownDataSeriesCode(const char *pszCode)
 class CADRGInformation::Private
 {
   public:
-    std::vector<BucketItem<ColorTableBased4x4Pixels>> codebook{};
+    std::vector<BucketItem<ColorTableBased4x4Pixels, int>> codebook{};
     std::vector<short> VQImage{};
     bool bHasTransparentPixels = false;
 };
@@ -1207,7 +1207,7 @@ constexpr uint16_t COLOR_GRAYSCALE_OFFSET_RECORD_LENGTH = 17;
 static void Create_CADRG_ColormapSection(
     GDALOffsetPatcher::OffsetPatcher *offsetPatcher, GDALDataset *poSrcDS,
     bool bHasTransparentPixels,
-    const std::vector<BucketItem<ColorTableBased4x4Pixels>> &codebook,
+    const std::vector<BucketItem<ColorTableBased4x4Pixels, int>> &codebook,
     const CADRGCreateCopyContext &copyContext)
 {
     auto poBuffer = offsetPatcher->CreateBuffer(
@@ -1397,7 +1397,7 @@ static void Create_CADRG_ColorConverterSubsection(
 
 static bool Perform_CADRG_VQ_Compression(
     GDALDataset *poSrcDS,
-    std::vector<BucketItem<ColorTableBased4x4Pixels>> &codebook,
+    std::vector<BucketItem<ColorTableBased4x4Pixels, int>> &codebook,
     std::vector<short> &VQImage, bool &bHasTransparentPixels)
 {
     const int nY = poSrcDS->GetRasterYSize();
@@ -1497,7 +1497,7 @@ static bool Perform_CADRG_VQ_Compression(
     }
 
     // Convert that map into a std::vector
-    std::vector<BucketItem<ColorTableBased4x4Pixels>> vectors;
+    std::vector<BucketItem<ColorTableBased4x4Pixels, int>> vectors;
     vectors.reserve(vectorMap.size());
     for (auto &[key, value] : vectorMap)
     {
@@ -1796,7 +1796,7 @@ static bool Write_CADRG_ImageDisplayParametersSection(
 
 static bool Write_CADRG_CompressionLookupSubSection(
     GDALOffsetPatcher::OffsetPatcher *offsetPatcher, VSILFILE *fp,
-    const std::vector<BucketItem<ColorTableBased4x4Pixels>> &codebook)
+    const std::vector<BucketItem<ColorTableBased4x4Pixels, int>> &codebook)
 {
     auto poBuffer = offsetPatcher->CreateBuffer(
         "CompressionLookupSubsection", /* bEndiannessIsLittle = */ false);
@@ -2335,23 +2335,16 @@ template <> class Vector<CADRG_RGB_Type>
     /*                              centroid()                              */
     /************************************************************************/
 
-    static Vector centroid(const Vector &a, int nA, const Vector &b, int nB,
-                           const CADRG_RGB_Type &) /* specialize */
+    static Vector centroid(const Vector &a, uint64_t nA, const Vector &b,
+                           uint64_t nB, const CADRG_RGB_Type &) /* specialize */
     {
-        Vector res;
-        res.m_R = static_cast<GByte>((static_cast<uint64_t>(a.m_R) * nA +
-                                      static_cast<uint64_t>(b.m_R) * nB +
-                                      (nA + nB) / 2) /
-                                     (nA + nB));
-        res.m_G = static_cast<GByte>((static_cast<uint64_t>(a.m_G) * nA +
-                                      static_cast<uint64_t>(b.m_G) * nB +
-                                      (nA + nB) / 2) /
-                                     (nA + nB));
-        res.m_B = static_cast<GByte>((static_cast<uint64_t>(a.m_B) * nA +
-                                      static_cast<uint64_t>(b.m_B) * nB +
-                                      (nA + nB) / 2) /
-                                     (nA + nB));
-        return res;
+        return Vector(
+            static_cast<GByte>((a.m_R * nA + b.m_R * nB + (nA + nB) / 2) /
+                               (nA + nB)),
+            static_cast<GByte>((a.m_G * nA + b.m_G * nB + (nA + nB) / 2) /
+                               (nA + nB)),
+            static_cast<GByte>((a.m_B * nA + b.m_B * nB + (nA + nB) / 2) /
+                               (nA + nB)));
     }
 
     /************************************************************************/
@@ -2435,17 +2428,11 @@ static bool ComputeColorTables(GDALDataset *poSrcDS, GDALColorTable &oCT,
         }
     }
 
-    std::vector<BucketItem<CADRG_RGB_Type>> vectors;
+    std::vector<BucketItem<CADRG_RGB_Type, uint64_t>> vectors;
     const int nColors =
         std::min(oCT.GetColorEntryCount(), CADRG_MAX_COLOR_ENTRY_COUNT);
     CPLAssert(anPixelCountPerColorTableEntry.size() >=
               static_cast<size_t>(nColors));
-
-    GUIntBig nTotalCount = 0;
-    for (int i = 0; i < nColors; ++i)
-    {
-        nTotalCount += anPixelCountPerColorTableEntry[i];
-    }
 
     // 3 for R,G,B
     std::map<std::array<GByte, 3>, std::vector<int>> oMapUniqueEntries;
@@ -2461,26 +2448,17 @@ static bool ComputeColorTables(GDALDataset *poSrcDS, GDALColorTable &oCT,
         }
     }
 
-    const int nUniqueColors = static_cast<int>(oMapUniqueEntries.size());
     for (auto &[RGB, indices] : oMapUniqueEntries)
     {
         uint64_t nThisEntryCount = 0;
         for (int idx : indices)
             nThisEntryCount += anPixelCountPerColorTableEntry[idx];
-
-        // Rescale pixel counts for primary color table so that their sum
-        // does not exceed INT_MAX, as this is the type of m_count in the
-        // BucketItem class.
-        const int nCountRescaled =
-            std::max(1, static_cast<int>(static_cast<double>(nThisEntryCount) /
-                                         static_cast<double>(nTotalCount) *
-                                         (INT_MAX - nUniqueColors)));
         Vector<CADRG_RGB_Type> v(RGB[0], RGB[1], RGB[2]);
-        vectors.emplace_back(v, nCountRescaled, std::move(indices));
+        vectors.emplace_back(v, nThisEntryCount, std::move(indices));
     }
 
     // Create the KD-Tree
-    PNNKDTree<CADRG_RGB_Type> kdtree;
+    PNNKDTree<CADRG_RGB_Type, uint64_t> kdtree;
     CADRG_RGB_Type ctxt;
 
     int nCodeCount = kdtree.insert(std::move(vectors), ctxt);
@@ -2491,13 +2469,14 @@ static bool ComputeColorTables(GDALDataset *poSrcDS, GDALColorTable &oCT,
         nCodeCount = kdtree.cluster(nCodeCount, CADRG_SECOND_CT_COUNT, ctxt);
         if (nCodeCount == 0)
             return false;
+        CPLAssert(nCodeCount <= CADRG_SECOND_CT_COUNT);
     }
 
     copyContext.oCT2 = GDALColorTable();
     copyContext.anMapCT1ToCT2.clear();
     copyContext.anMapCT1ToCT2.resize(nColors);
     kdtree.iterateOverLeaves(
-        [&oCT, &copyContext](PNNKDTree<CADRG_RGB_Type> &node)
+        [&oCT, &copyContext](PNNKDTree<CADRG_RGB_Type, uint64_t> &node)
         {
             CPL_IGNORE_RET_VAL(oCT);
             int i = copyContext.oCT2.GetColorEntryCount();
@@ -2530,13 +2509,14 @@ static bool ComputeColorTables(GDALDataset *poSrcDS, GDALColorTable &oCT,
         nCodeCount = kdtree.cluster(nCodeCount, CADRG_THIRD_CT_COUNT, ctxt);
         if (nCodeCount == 0)
             return false;
+        CPLAssert(nCodeCount <= CADRG_THIRD_CT_COUNT);
     }
 
     copyContext.oCT3 = GDALColorTable();
     copyContext.anMapCT1ToCT3.clear();
     copyContext.anMapCT1ToCT3.resize(nColors);
     kdtree.iterateOverLeaves(
-        [&oCT, &copyContext](PNNKDTree<CADRG_RGB_Type> &node)
+        [&oCT, &copyContext](PNNKDTree<CADRG_RGB_Type, uint64_t> &node)
         {
             CPL_IGNORE_RET_VAL(oCT);
             int i = copyContext.oCT3.GetColorEntryCount();
