@@ -751,8 +751,8 @@ int PNNKDTree<T>::cluster(int initialBucketCount, int targetCount,
                                 const auto &itemJ =
                                     bucket.m_bucketItems[j + subj];
                                 const double increasedDistortion =
-                                    itemI.m_count * itemJ.m_count *
-                                    static_cast<double>(tabSquaredDist[subj]) /
+                                    static_cast<double>(itemI.m_count) *
+                                    itemJ.m_count * tabSquaredDist[subj] /
                                     (itemI.m_count + itemJ.m_count);
                                 TupleInfo ti;
                                 ti.bucket = &bucket;
@@ -769,9 +769,8 @@ int PNNKDTree<T>::cluster(int initialBucketCount, int targetCount,
                     {
                         const auto &itemJ = bucket.m_bucketItems[j];
                         const double increasedDistortion =
-                            itemI.m_count * itemJ.m_count *
-                            static_cast<double>(itemI.m_vec.squared_distance(
-                                itemJ.m_vec, ctxt)) /
+                            static_cast<double>(itemI.m_count) * itemJ.m_count *
+                            itemI.m_vec.squared_distance(itemJ.m_vec, ctxt) /
                             (itemI.m_count + itemJ.m_count);
                         TupleInfo ti;
                         ti.bucket = &bucket;
