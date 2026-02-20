@@ -95,7 +95,7 @@ TEST_F(test_kdtree_vq_cadrg, kdtree)
     ColorTableBased4x4Pixels colorTable(r, g, b);
 
     PNNKDTree<ColorTableBased4x4Pixels> kdtree;
-    std::vector<BucketItem<ColorTableBased4x4Pixels, int>> vectors;
+    std::vector<BucketItem<ColorTableBased4x4Pixels>> vectors;
     for (GByte i = 0; i < 15; ++i)
     {
         vectors.emplace_back(
@@ -106,7 +106,7 @@ TEST_F(test_kdtree_vq_cadrg, kdtree)
 
     EXPECT_EQ(kdtree.cluster(15, 4, colorTable), 4);
 
-    std::vector<BucketItem<ColorTableBased4x4Pixels, int>> items;
+    std::vector<BucketItem<ColorTableBased4x4Pixels>> items;
     kdtree.iterateOverLeaves(
         [&items](PNNKDTree<ColorTableBased4x4Pixels> &node)
         {
