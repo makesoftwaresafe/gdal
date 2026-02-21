@@ -7547,6 +7547,9 @@ def test_nitf_create_cadrg_with_transparency(tmp_path):
 @gdaltest.enable_exceptions()
 def test_nitf_create_cadrg_auto_tile_north_hemisphere(tmp_path):
 
+    if gdaltest.is_travis_branch("alpine_32bit"):
+        pytest.skip("randomly crashes on alpine_32bit")
+
     tab_pct = [0]
 
     def my_progress(pct, msg, user_data):
