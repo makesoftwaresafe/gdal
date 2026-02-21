@@ -4201,6 +4201,89 @@ def test_zarr_advise_read(tmp_path, compression, format):
     read()
 
 
+###############################################################################
+# Test auto-parallel IRead: GDAL_NUM_THREADS triggers IAdviseRead() internally
+
+
+@pytest.mark.parametrize("format", ["ZARR_V2", "ZARR_V3"])
+@gdaltest.enable_exceptions()
+def test_zarr_iread_auto_parallel(tmp_path, format):
+
+    filename = str(tmp_path / "test.zarr")
+    dim0_size = 100
+    dim1_size = 120
+    blocksize = 20
+    data_ar = [(i % 256) for i in range(dim0_size * dim1_size)]
+    data = array.array("B", data_ar)
+
+    ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+        filename, options=["FORMAT=" + format]
+    )
+    rg = ds.GetRootGroup()
+    dim0 = rg.CreateDimension("dim0", None, None, dim0_size)
+    dim1 = rg.CreateDimension("dim1", None, None, dim1_size)
+    ar = rg.CreateMDArray(
+        "test",
+        [dim0, dim1],
+        gdal.ExtendedDataType.Create(gdal.GDT_UInt8),
+        ["BLOCKSIZE=%d,%d" % (blocksize, blocksize)],
+    )
+    assert ar.Write(data) == gdal.CE_None
+    ds = None
+
+    # Reference: sequential read
+    ds = gdal.OpenEx(filename, gdal.OF_MULTIDIM_RASTER)
+    ar = ds.GetRootGroup().OpenMDArray("test")
+    expected_full = ar.Read()
+    expected_strided = ar.Read(
+        array_start_idx=[0, 0],
+        count=[dim0_size // 2, dim1_size // 2],
+        array_step=[2, 2],
+    )
+    expected_sub1 = ar.Read(
+        array_start_idx=[0, 0], count=[dim0_size // 2, dim1_size // 2]
+    )
+    expected_sub2 = ar.Read(
+        array_start_idx=[dim0_size // 2, dim1_size // 2],
+        count=[dim0_size // 2, dim1_size // 2],
+    )
+    ds = None
+
+    with gdal.config_option("GDAL_NUM_THREADS", "ALL_CPUS"):
+        ds = gdal.OpenEx(filename, gdal.OF_MULTIDIM_RASTER)
+        ar = ds.GetRootGroup().OpenMDArray("test")
+
+        # Full read
+        assert ar.Read() == expected_full
+
+        # Strided read (step > 1): verifies adjusted count passed to
+        # IAdviseRead covers the full element range, not just count elements.
+        assert (
+            ar.Read(
+                array_start_idx=[0, 0],
+                count=[dim0_size // 2, dim1_size // 2],
+                array_step=[2, 2],
+            )
+            == expected_strided
+        )
+
+        # Two sequential sub-region reads on the same array: verifies stale
+        # cache from the first read does not block auto-parallel on the second.
+        assert (
+            ar.Read(array_start_idx=[0, 0], count=[dim0_size // 2, dim1_size // 2])
+            == expected_sub1
+        )
+        assert (
+            ar.Read(
+                array_start_idx=[dim0_size // 2, dim1_size // 2],
+                count=[dim0_size // 2, dim1_size // 2],
+            )
+            == expected_sub2
+        )
+
+        ds = None
+
+
 def test_zarr_read_invalid_nczarr_dim(tmp_vsimem):
 
     gdal.Mkdir(tmp_vsimem / "test.zarr", 0)
