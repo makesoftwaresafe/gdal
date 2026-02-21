@@ -117,7 +117,7 @@ static int DTEDPtStreamNewTile(DTEDPtStream *psStream, int nCrLong, int nCrLat)
         chEWHemi = 'e';
 
     snprintf(szFile, sizeof(szFile), "%c%03d%c%03d.dt%d", chEWHemi,
-             ABS(nCrLong), chNSHemi, ABS(nCrLat), psStream->nLevel);
+             CPL_ABS(nCrLong), chNSHemi, CPL_ABS(nCrLat), psStream->nLevel);
 
     pszFullFilename =
         CPLStrdup(CPLFormFilename(psStream->pszPath, szFile, NULL));
@@ -175,7 +175,7 @@ static int DTEDWritePtLL(CPL_UNUSED DTEDPtStream *psStream,
     int iProfile, i, iRow;
 
     iProfile = (int)((dfLong - psInfo->dfULCornerX) / psInfo->dfPixelSizeX);
-    iProfile = MAX(0, MIN(psInfo->nXSize - 1, iProfile));
+    iProfile = CPL_MAX(0, CPL_MIN(psInfo->nXSize - 1, iProfile));
 
     if (psCF->papanProfiles[iProfile] == NULL)
     {
@@ -190,7 +190,7 @@ static int DTEDWritePtLL(CPL_UNUSED DTEDPtStream *psStream,
     /*      Establish where we fit in the profile.                          */
     /* -------------------------------------------------------------------- */
     iRow = (int)((psInfo->dfULCornerY - dfLat) / psInfo->dfPixelSizeY);
-    iRow = MAX(0, MIN(psInfo->nYSize - 1, iRow));
+    iRow = CPL_MAX(0, CPL_MIN(psInfo->nYSize - 1, iRow));
 
     psCF->papanProfiles[iProfile][iRow] = (GInt16)floor(dfElev + 0.5);
 
@@ -416,10 +416,10 @@ static void DTEDFillPixel(DTEDInfo *psInfo, GInt16 **papanProfiles,
     double dfCoefSum = 0.0, dfValueSum = 0.0;
     int iXS, iYS;
 
-    nXMin = MAX(0, iX - nPixelSearchDist);
-    nXMax = MIN(psInfo->nXSize - 1, iX + nPixelSearchDist);
-    nYMin = MAX(0, iY - nPixelSearchDist);
-    nYMax = MIN(psInfo->nYSize - 1, iY + nPixelSearchDist);
+    nXMin = CPL_MAX(0, iX - nPixelSearchDist);
+    nXMax = CPL_MIN(psInfo->nXSize - 1, iX + nPixelSearchDist);
+    nYMin = CPL_MAX(0, iY - nPixelSearchDist);
+    nYMax = CPL_MIN(psInfo->nYSize - 1, iY + nPixelSearchDist);
 
     for (iXS = nXMin; iXS <= nXMax; iXS++)
     {
