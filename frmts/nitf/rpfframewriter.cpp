@@ -2471,10 +2471,11 @@ static bool ComputeColorTables(GDALDataset *poSrcDS, GDALColorTable &oCT,
         // Rescale pixel counts for primary color table so that their sum
         // does not exceed INT_MAX, as this is the type of m_count in the
         // BucketItem class.
-        const int nCountRescaled =
-            std::max(1, static_cast<int>(static_cast<double>(nThisEntryCount) /
-                                         static_cast<double>(nTotalCount) *
-                                         (INT_MAX - nUniqueColors)));
+        const int nCountRescaled = std::max(
+            1, static_cast<int>(
+                   static_cast<double>(nThisEntryCount) /
+                   static_cast<double>(std::max<GUIntBig>(1, nTotalCount)) *
+                   (INT_MAX - nUniqueColors)));
         Vector<CADRG_RGB_Type> v(RGB[0], RGB[1], RGB[2]);
         vectors.emplace_back(v, nCountRescaled, std::move(indices));
     }
