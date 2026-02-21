@@ -25,6 +25,9 @@
 #include <exception>
 #include <memory>
 #include <string>
+#if __cplusplus >= 201703L || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
+#include <string_view>
+#endif
 #include <vector>
 
 /**
@@ -1427,6 +1430,18 @@ class CPL_DLL OGRFeature
     void SetField(int i, GIntBig nValue);
     void SetField(int i, double dfValue);
     void SetField(int i, const char *pszValue);
+#if defined(DOXYGEN_SKIP) || __cplusplus >= 201703L ||                         \
+    (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
+    void SetField(int i, std::string_view svValue);
+
+    //! @cond Doxygen_Suppress
+    inline void SetField(int i, const std::string &osValue)
+    {
+        SetField(i, osValue.c_str());
+    }
+
+    //! @endcond
+#endif
     void SetField(int i, int nCount, const int *panValues);
     void SetField(int i, int nCount, const GIntBig *panValues);
     void SetField(int i, int nCount, const double *padfValues);
