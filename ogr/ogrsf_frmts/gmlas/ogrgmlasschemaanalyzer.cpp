@@ -1381,6 +1381,7 @@ bool GMLASSchemaAnalyzer::InstantiateClassFromEltDeclaration(
 /*                 SetFieldTypeAndWidthFromDefinition()                 */
 /************************************************************************/
 
+/* static */
 void GMLASSchemaAnalyzer::SetFieldTypeAndWidthFromDefinition(
     XSSimpleTypeDefinition *poST, GMLASField &oField)
 {
