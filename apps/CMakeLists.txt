@@ -328,7 +328,6 @@ if (BUILD_APPS)
   add_executable(dumpoverviews EXCLUDE_FROM_ALL dumpoverviews.cpp)
   add_executable(gdalflattenmask EXCLUDE_FROM_ALL gdalflattenmask.c)
   add_executable(gdaltorture EXCLUDE_FROM_ALL gdaltorture.cpp)
-  add_executable(gdal2ogr EXCLUDE_FROM_ALL gdal2ogr.c)
   add_executable(gdalasyncread EXCLUDE_FROM_ALL gdalasyncread.cpp)
   add_executable(multireadtest EXCLUDE_FROM_ALL multireadtest.cpp)
   if(NOT MSVC AND CMAKE_THREAD_LIBS_INIT)
@@ -341,7 +340,6 @@ if (BUILD_APPS)
 
   set(APPS_NON_DEFAULT_TARGETS
       dumpoverviews
-      gdal2ogr
       gdalasyncread
       gdaltorture
       gdalflattenmask
