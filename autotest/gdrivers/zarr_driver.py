@@ -8574,6 +8574,16 @@ def test_zarr_build_overviews_classic_bridge(tmp_vsimem):
     assert ovr.GetDimensions()[0].GetSize() == 32
     vals = struct.unpack("f" * 32 * 32, ovr.Read())
     assert vals[0] == 7.0
+    ds.Close()
+
+    # Verify overviews are visible when reopening via the ZARR subdataset
+    # syntax, which is the typical access pattern for /vsis3/.
+    # Regression test for GetParentGroup() not resolving root-level arrays.
+    ds = gdal.OpenEx(f'ZARR:"{path}":/data', gdal.OF_RASTER)
+    band = ds.GetRasterBand(1)
+    assert band.GetOverviewCount() == 1
+    ovr_band = band.GetOverview(0)
+    assert ovr_band.XSize == 32 and ovr_band.YSize == 32
 
 
 ###############################################################################
