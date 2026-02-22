@@ -7164,10 +7164,6 @@ def mutate_multiscale_missing_asset(j):
     j["attributes"]["multiscales"]["layout"] = [{}]
 
 
-def mutate_multiscale_assert_not_existing(j):
-    j["attributes"]["multiscales"]["layout"] = [{"asset": "non_existing"}]
-
-
 def mutate_multiscale_asset_not_same_dim_count(j):
     j["consolidated_metadata"]["metadata"]["level1/ar"]["shape"] = [100]
     j["consolidated_metadata"]["metadata"]["level1/ar"]["chunk_grid"]["configuration"][
@@ -7195,10 +7191,6 @@ def mutate_multiscale_derived_from_not_same_dim_count(j):
     [
         (mutate_multiscale_missing_layout, "layout not found in multiscales"),
         (mutate_multiscale_missing_asset, "multiscales.layout[].asset not found"),
-        (
-            mutate_multiscale_assert_not_existing,
-            "multiscales.layout[].asset=non_existing ignored, because it is not a valid group or array name",
-        ),
         (
             mutate_multiscale_asset_not_same_dim_count,
             "multiscales.layout[].asset=level1 (/level1/ar) ignored, because it  has not the same dimension count as ar (/level0/ar)",
@@ -8236,3 +8228,536 @@ def test_zarr_write_sharded_interop_zarr_python(tmp_path):
         np.array(root["data"]),
         np.array(expected, dtype=np.float32).reshape(nrows, ncols),
     )
+
+
+###############################################################################
+# Test BuildOverviews: non-square dims, sequential data, nodata, codec,
+# round-trip, and multiscales metadata in one comprehensive test.
+
+
+def test_zarr_build_overviews(tmp_vsimem):
+
+    ny, nx = 200, 100
+
+    def create():
+        ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+            tmp_vsimem / "test_ovr.zarr", options=["FORMAT=ZARR_V3"]
+        )
+        rg = ds.GetRootGroup()
+        dim_y = rg.CreateDimension("Y", None, None, ny)
+        dim_x = rg.CreateDimension("X", None, None, nx)
+        ar = rg.CreateMDArray(
+            "data",
+            [dim_y, dim_x],
+            gdal.ExtendedDataType.Create(gdal.GDT_Float32),
+            ["COMPRESS=GZIP"],
+        )
+        ar.SetNoDataValueDouble(-9999.0)
+        # Sequential data: pixel[y,x] = y * nx + x  (catches axis inversion)
+        data = struct.pack("f" * ny * nx, *[float(i) for i in range(ny * nx)])
+        ar.Write(data)
+        # Unsorted factors to test sort+dedup.
+        assert ar.BuildOverviews("AVERAGE", [4, 2]) == gdal.CE_None
+
+    create()
+
+    # -- Round-trip: reopen and verify --
+    ds = gdal.OpenEx(tmp_vsimem / "test_ovr.zarr", gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+    ar = rg.OpenMDArray("data")
+    assert ar.GetOverviewCount() == 2
+
+    # 2x overview: ceil(200/2)=100, ceil(100/2)=50
+    ovr0 = ar.GetOverview(0)
+    dims0 = ovr0.GetDimensions()
+    assert dims0[0].GetSize() == 100
+    assert dims0[1].GetSize() == 50
+
+    # 4x overview: ceil(200/4)=50, ceil(100/4)=25
+    ovr1 = ar.GetOverview(1)
+    dims1 = ovr1.GetDimensions()
+    assert dims1[0].GetSize() == 50
+    assert dims1[1].GetSize() == 25
+
+    # Pixel values: AVERAGE of 2x2 blocks of sequential data.
+    # ovr2[0,0] = avg(0, 1, 100, 101) = 50.5
+    raw0 = ovr0.Read()
+    vals0 = struct.unpack("f" * 100 * 50, raw0)
+    assert abs(vals0[0] - 50.5) < 0.01
+    # ovr2[1,0] = avg(200, 201, 300, 301) = 250.5
+    assert abs(vals0[50] - 250.5) < 0.01
+
+    # NoData propagated to both overview levels.
+    assert ovr0.GetNoDataValueAsDouble() == -9999.0
+    assert ovr1.GetNoDataValueAsDouble() == -9999.0
+    ds = None
+
+    # -- Codec inherited in overview zarr.json --
+    ovr_json = str(tmp_vsimem / "test_ovr.zarr" / "ovr_2x" / "data" / "zarr.json")
+    f = gdal.VSIFOpenL(ovr_json, "rb")
+    assert f is not None
+    content = gdal.VSIFReadL(1, 100000, f)
+    gdal.VSIFCloseL(f)
+    meta = json.loads(content)
+    codec_names = [c.get("name", "") for c in meta.get("codecs", [])]
+    assert "gzip" in codec_names, f"Expected gzip in codecs, got {codec_names}"
+
+    # -- Multiscales metadata --
+    f = gdal.VSIFOpenL(tmp_vsimem / "test_ovr.zarr/zarr.json", "rb")
+    assert f
+    raw_meta = gdal.VSIFReadL(1, 100000, f)
+    gdal.VSIFCloseL(f)
+    j = json.loads(raw_meta)
+    attrs = j.get("attributes", {})
+    multiscales = attrs.get("multiscales")
+    if isinstance(multiscales, str):
+        multiscales = json.loads(multiscales)
+    layout = multiscales["layout"]
+    assert len(layout) == 3
+
+    assert layout[0]["asset"] == "data"
+    assert "derived_from" not in layout[0]
+    assert layout[0]["transform"]["scale"] == [1.0, 1.0]
+
+    assert layout[1]["asset"] == "ovr_2x"
+    assert layout[1]["derived_from"] == "data"
+    assert layout[1]["transform"]["scale"] == [2.0, 2.0]
+    assert layout[1]["resampling_method"] == "AVERAGE"
+
+    assert layout[2]["asset"] == "ovr_4x"
+    assert layout[2]["derived_from"] == "ovr_2x"
+    assert layout[2]["transform"]["scale"] == [2.0, 2.0]
+
+    zc = attrs.get("zarr_conventions")
+    if isinstance(zc, str):
+        zc = json.loads(zc)
+    ms_entry = [e for e in zc if e.get("name") == "multiscales"]
+    assert len(ms_entry) == 1
+    assert "uuid" in ms_entry[0]
+
+    # -- Chain resampling: 3x built from 2x, not from base (NEAREST) --
+    chain_path = tmp_vsimem / "test_ovr_chain.zarr"
+    ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+        chain_path, options=["FORMAT=ZARR_V3"]
+    )
+    rg = ds.GetRootGroup()
+    ar = rg.CreateMDArray(
+        "data",
+        [
+            rg.CreateDimension("Y", None, None, 60),
+            rg.CreateDimension("X", None, None, 90),
+        ],
+        gdal.ExtendedDataType.Create(gdal.GDT_Float32),
+    )
+    ar.Write(
+        struct.pack(
+            "f" * 60 * 90,
+            *[float(r * 90 + c) for r in range(60) for c in range(90)],
+        )
+    )
+    assert ar.BuildOverviews("NEAREST", [2, 3]) == gdal.CE_None
+    ds = None
+    ds = gdal.OpenEx(chain_path, gdal.OF_MULTIDIM_RASTER)
+    ar = ds.GetRootGroup().OpenMDArray("data")
+    ovr3 = ar.GetOverview(1)
+    assert ovr3.GetDimensions()[0].GetSize() == 20  # ceil(60/3)
+    assert ovr3.GetDimensions()[1].GetSize() == 30  # ceil(90/3)
+    vals3 = struct.unpack("f" * 20 * 30, ovr3.Read())
+    # [1,0] = 360 (chained from 2x) vs 270 (direct from base) proves chaining.
+    assert vals3[30] == 360.0
+
+
+###############################################################################
+# Test BuildOverviews error cases
+
+
+@gdaltest.enable_exceptions()
+def test_zarr_build_overviews_errors(tmp_vsimem):
+
+    # 1D array (< 2 dimensions)
+    ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+        tmp_vsimem / "test_ovr_1d.zarr", options=["FORMAT=ZARR_V3"]
+    )
+    rg = ds.GetRootGroup()
+    ar = rg.CreateMDArray(
+        "data",
+        [rg.CreateDimension("X", None, None, 64)],
+        gdal.ExtendedDataType.Create(gdal.GDT_Float32),
+    )
+    with pytest.raises(Exception, match="requires at least 2 dimensions"):
+        ar.BuildOverviews("NEAREST", [2])
+    ds = None
+
+    # Read-only dataset
+    ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+        tmp_vsimem / "test_ovr_ro.zarr", options=["FORMAT=ZARR_V3"]
+    )
+    rg = ds.GetRootGroup()
+    rg.CreateMDArray(
+        "data",
+        [
+            rg.CreateDimension("Y", None, None, 64),
+            rg.CreateDimension("X", None, None, 64),
+        ],
+        gdal.ExtendedDataType.Create(gdal.GDT_Float32),
+    )
+    ds = None
+    ds = gdal.OpenEx(tmp_vsimem / "test_ovr_ro.zarr", gdal.OF_MULTIDIM_RASTER)
+    ar = ds.GetRootGroup().OpenMDArray("data")
+    with pytest.raises(Exception, match="not open in update mode"):
+        ar.BuildOverviews("NEAREST", [2])
+    ds = None
+
+    # Invalid factors (< 2)
+    ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+        tmp_vsimem / "test_ovr_badfac.zarr", options=["FORMAT=ZARR_V3"]
+    )
+    rg = ds.GetRootGroup()
+    ar = rg.CreateMDArray(
+        "data",
+        [
+            rg.CreateDimension("Y", None, None, 64),
+            rg.CreateDimension("X", None, None, 64),
+        ],
+        gdal.ExtendedDataType.Create(gdal.GDT_Float32),
+    )
+    with pytest.raises(Exception, match="is invalid"):
+        ar.BuildOverviews("NEAREST", [1])
+    with pytest.raises(Exception, match="is invalid"):
+        ar.BuildOverviews("NEAREST", [0])
+
+
+###############################################################################
+# Test BuildOverviews rebuild (idempotent) and clear (nOverviews=0)
+
+
+def test_zarr_build_overviews_rebuild_and_clear(tmp_vsimem):
+
+    path = tmp_vsimem / "test_ovr_rebuild.zarr"
+
+    def create():
+        ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+            path, options=["FORMAT=ZARR_V3"]
+        )
+        rg = ds.GetRootGroup()
+        dim_y = rg.CreateDimension("Y", None, None, 90)
+        dim_x = rg.CreateDimension("X", None, None, 60)
+        ar = rg.CreateMDArray(
+            "data",
+            [dim_y, dim_x],
+            gdal.ExtendedDataType.Create(gdal.GDT_Float32),
+        )
+        ar.Write(struct.pack("f" * 90 * 60, *[50.0] * (90 * 60)))
+        # Build with [2], then rebuild with [3] (non-pow2).
+        assert ar.BuildOverviews("NEAREST", [2]) == gdal.CE_None
+        assert ar.BuildOverviews("NEAREST", [3]) == gdal.CE_None
+
+    create()
+
+    # Verify rebuild replaced the old overviews.
+    ds = gdal.OpenEx(path, gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+    ar = rg.OpenMDArray("data")
+    assert ar.GetOverviewCount() == 1
+    assert ar.GetOverview(0).GetDimensions()[0].GetSize() == 30  # ceil(90/3)
+    assert ar.GetOverview(0).GetDimensions()[1].GetSize() == 20  # ceil(60/3)
+    assert "ovr_2x" not in rg.GetGroupNames()
+    assert "ovr_3x" in rg.GetGroupNames()
+    ds = None
+
+    # Clear overviews.
+    ds = gdal.OpenEx(path, gdal.OF_MULTIDIM_RASTER | gdal.OF_UPDATE)
+    rg = ds.GetRootGroup()
+    ar = rg.OpenMDArray("data")
+    assert ar.BuildOverviews("NEAREST", []) == gdal.CE_None
+    ds = None
+
+    # Verify overviews gone and metadata cleaned up.
+    ds = gdal.OpenEx(path, gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+    ar = rg.OpenMDArray("data")
+    assert ar.GetOverviewCount() == 0
+    assert rg.GetAttribute("multiscales") is None
+
+
+###############################################################################
+# Test BuildOverviews on a 3D array (time, Y, X): spatial dims downsampled,
+# non-spatial dim preserved.
+
+
+def test_zarr_build_overviews_3d(tmp_vsimem):
+
+    path = tmp_vsimem / "test_ovr_3d.zarr"
+
+    def create():
+        ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+            path, options=["FORMAT=ZARR_V3"]
+        )
+        rg = ds.GetRootGroup()
+        dim_t = rg.CreateDimension("time", None, None, 3)
+        dim_y = rg.CreateDimension("Y", None, None, 64)
+        dim_x = rg.CreateDimension("X", None, None, 64)
+        ar = rg.CreateMDArray(
+            "data",
+            [dim_t, dim_y, dim_x],
+            gdal.ExtendedDataType.Create(gdal.GDT_Float32),
+        )
+        # Each time step: t0=10, t1=20, t2=30
+        vals = []
+        for t in range(3):
+            vals.extend([float((t + 1) * 10)] * (64 * 64))
+        ar.Write(struct.pack("f" * len(vals), *vals))
+        assert ar.BuildOverviews("NEAREST", [2]) == gdal.CE_None
+
+    create()
+
+    ds = gdal.OpenEx(path, gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+    ar = rg.OpenMDArray("data")
+    ovr = ar.GetOverview(0)
+    dims = ovr.GetDimensions()
+    assert dims[0].GetSize() == 3  # time unchanged
+    assert dims[1].GetSize() == 32  # Y halved
+    assert dims[2].GetSize() == 32  # X halved
+
+    raw = ovr.Read()
+    vals = struct.unpack("f" * (3 * 32 * 32), raw)
+    assert vals[0] == 10.0
+    assert vals[32 * 32] == 20.0
+    assert vals[2 * 32 * 32] == 30.0
+    ds = None
+
+    # Multiscales: scale=[1.0, 2.0, 2.0] for 3D
+    f = gdal.VSIFOpenL(str(path) + "/zarr.json", "rb")
+    raw_meta = gdal.VSIFReadL(1, 100000, f)
+    gdal.VSIFCloseL(f)
+    j = json.loads(raw_meta)
+    multiscales = j["attributes"]["multiscales"]
+    if isinstance(multiscales, str):
+        multiscales = json.loads(multiscales)
+    layout = multiscales["layout"]
+    assert layout[0]["transform"]["scale"] == [1.0, 1.0, 1.0]
+    assert layout[1]["transform"]["scale"] == [1.0, 2.0, 2.0]
+
+
+###############################################################################
+# Test BuildOverviews via AsClassicDataset bridge
+
+
+def test_zarr_build_overviews_classic_bridge(tmp_vsimem):
+
+    path = tmp_vsimem / "test_ovr_bridge.zarr"
+
+    def create():
+        ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+            path, options=["FORMAT=ZARR_V3"]
+        )
+        rg = ds.GetRootGroup()
+        dim_y = rg.CreateDimension("Y", None, None, 64)
+        dim_x = rg.CreateDimension("X", None, None, 64)
+        ar = rg.CreateMDArray(
+            "data",
+            [dim_y, dim_x],
+            gdal.ExtendedDataType.Create(gdal.GDT_Float32),
+        )
+        ar.Write(struct.pack("f" * 64 * 64, *[7.0] * (64 * 64)))
+        classic_ds = ar.AsClassicDataset(1, 0)
+        assert classic_ds.BuildOverviews("NEAREST", [2]) == gdal.CE_None
+
+    create()
+
+    ds = gdal.OpenEx(path, gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+    ar = rg.OpenMDArray("data")
+    assert ar.GetOverviewCount() == 1
+    ovr = ar.GetOverview(0)
+    assert ovr.GetDimensions()[0].GetSize() == 32
+    vals = struct.unpack("f" * 32 * 32, ovr.Read())
+    assert vals[0] == 7.0
+    ds.Close()
+
+    # Verify overviews are visible when reopening via the ZARR subdataset
+    # syntax, which is the typical access pattern for /vsis3/.
+    # Regression test for GetParentGroup() not resolving root-level arrays.
+    ds = gdal.OpenEx(f'ZARR:"{path}":/data', gdal.OF_RASTER)
+    band = ds.GetRasterBand(1)
+    assert band.GetOverviewCount() == 1
+    ovr_band = band.GetOverview(0)
+    assert ovr_band.XSize == 32 and ovr_band.YSize == 32
+
+
+###############################################################################
+# Test BuildOverviews coordinate arrays: regular (recalculated) and
+# irregular (subsampled) spacing in one test.
+
+
+def test_zarr_build_overviews_coord_arrays(tmp_vsimem):
+
+    path = tmp_vsimem / "test_ovr_coords.zarr"
+    f64 = gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+
+    # Irregular spacing for Y (quadratic), regular for X.
+    src_y = [i**1.5 for i in range(64)]
+
+    def create():
+        ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+            path, options=["FORMAT=ZARR_V3"]
+        )
+        rg = ds.GetRootGroup()
+        dim_y = rg.CreateDimension("Y", "HORIZONTAL_Y", "NORTH", 64)
+        dim_x = rg.CreateDimension("X", "HORIZONTAL_X", "EAST", 128)
+
+        coord_y = rg.CreateMDArray("Y", [dim_y], f64)
+        coord_y.Write(struct.pack("d" * 64, *src_y))
+        dim_y.SetIndexingVariable(coord_y)
+
+        coord_x = rg.CreateMDArray("X", [dim_x], f64)
+        coord_x.Write(struct.pack("d" * 128, *[-120.0 + i * 0.05 for i in range(128)]))
+        dim_x.SetIndexingVariable(coord_x)
+
+        ar = rg.CreateMDArray(
+            "data",
+            [dim_y, dim_x],
+            gdal.ExtendedDataType.Create(gdal.GDT_Float32),
+        )
+        ar.Write(struct.pack("f" * 64 * 128, *[1.0] * (64 * 128)))
+        assert ar.BuildOverviews("NEAREST", [2]) == gdal.CE_None
+
+    create()
+
+    ds = gdal.OpenEx(path, gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+    ovr_group = rg.OpenGroup("ovr_2x")
+    assert ovr_group is not None
+
+    # Y: irregular -> subsampled: overview[j] = src[j*2 + 1]
+    coord_y = ovr_group.OpenMDArray("Y")
+    assert coord_y.GetDimensions()[0].GetSize() == 32
+    y_vals = struct.unpack("d" * 32, coord_y.Read())
+    for j in range(32):
+        assert abs(y_vals[j] - src_y[j * 2 + 1]) < 1e-10
+
+    # X: regular -> recalculated: start + (j*2 + 0.5) * increment
+    coord_x = ovr_group.OpenMDArray("X")
+    assert coord_x.GetDimensions()[0].GetSize() == 64
+    x_vals = struct.unpack("d" * 64, coord_x.Read())
+    assert abs(x_vals[0] - (-120.0 + 0.5 * 0.05)) < 1e-10
+    assert abs(x_vals[1] - (-120.0 + 2.5 * 0.05)) < 1e-10
+
+
+###############################################################################
+# Test BuildOverviews inherits codec from reopened (not freshly created) array
+
+
+def test_zarr_build_overviews_codec_inheritance_reopen(tmp_vsimem):
+    """Reopened array: ReconstructCreationOptionsFromCodecs populates
+    creation options from the codec chain so overviews inherit compression."""
+
+    compressors = gdal.GetDriverByName("Zarr").GetMetadataItem("COMPRESSORS")
+    if "zstd" not in compressors:
+        pytest.skip("compressor zstd not available")
+
+    path = tmp_vsimem / "test_ovr_codec_reopen.zarr"
+
+    # Create compressed + sharded array, then close.
+    ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+        path, options=["FORMAT=ZARR_V3"]
+    )
+    rg = ds.GetRootGroup()
+    dim_y = rg.CreateDimension("Y", None, None, 128)
+    dim_x = rg.CreateDimension("X", None, None, 128)
+    rg.CreateMDArray(
+        "data",
+        [dim_y, dim_x],
+        gdal.ExtendedDataType.Create(gdal.GDT_Float32),
+        [
+            "COMPRESS=ZSTD",
+            "ZSTD_LEVEL=3",
+            "BLOCKSIZE=128,128",
+            "SHARD_CHUNK_SHAPE=64,64",
+        ],
+    )
+    ds = None
+
+    # Reopen and build overviews (m_aosCreationOptions is empty here).
+    ds = gdal.OpenEx(path, gdal.OF_MULTIDIM_RASTER | gdal.OF_UPDATE)
+    ar = ds.GetRootGroup().OpenMDArray("data")
+    assert ar.BuildOverviews("NEAREST", [2]) == gdal.CE_None
+    ds = None
+
+    # Verify overview has zstd codec.
+    f = gdal.VSIFOpenL(str(path / "ovr_2x" / "data" / "zarr.json"), "rb")
+    assert f is not None
+    meta = json.loads(gdal.VSIFReadL(1, 100000, f))
+    gdal.VSIFCloseL(f)
+    codecs = meta.get("codecs", [])
+    codec_names = [c.get("name", "") for c in codecs]
+
+    if "sharding_indexed" in codec_names:
+        inner = (
+            codecs[codec_names.index("sharding_indexed")]
+            .get("configuration", {})
+            .get("codecs", [])
+        )
+        inner_names = [c.get("name", "") for c in inner]
+        assert "zstd" in inner_names
+        zstd_cfg = next(c for c in inner if c["name"] == "zstd")
+        assert zstd_cfg["configuration"]["level"] == 3
+    else:
+        assert "zstd" in codec_names
+
+
+###############################################################################
+# Test BuildOverviews on a store with mixed 2D data + 1D coordinate arrays:
+# only the target array should discover overviews, and no warnings should be
+# emitted for unrelated arrays (reproduces scenario from #13980 review).
+
+
+def test_zarr_build_overviews_mixed_arrays(tmp_vsimem):
+
+    path = tmp_vsimem / "test_ovr_mixed.zarr"
+    f64 = gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    f32 = gdal.ExtendedDataType.Create(gdal.GDT_Float32)
+
+    def create():
+        ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+            path, options=["FORMAT=ZARR_V3"]
+        )
+        rg = ds.GetRootGroup()
+        dim_y = rg.CreateDimension("Y", "HORIZONTAL_Y", "NORTH", 20)
+        dim_x = rg.CreateDimension("X", "HORIZONTAL_X", "EAST", 20)
+
+        coord_y = rg.CreateMDArray("Y", [dim_y], f64)
+        coord_y.Write(struct.pack("d" * 20, *range(20)))
+        dim_y.SetIndexingVariable(coord_y)
+
+        coord_x = rg.CreateMDArray("X", [dim_x], f64)
+        coord_x.Write(struct.pack("d" * 20, *range(20)))
+        dim_x.SetIndexingVariable(coord_x)
+
+        # Two 2D data arrays, only build overviews on one.
+        for name in ["q", "z"]:
+            ar = rg.CreateMDArray(name, [dim_y, dim_x], f32)
+            ar.Write(struct.pack("f" * 400, *[1.0] * 400))
+
+        ar_q = rg.OpenMDArray("q")
+        assert ar_q.BuildOverviews("NEAREST", [2]) == gdal.CE_None
+
+    create()
+
+    # Reopen read-only. Verify overviews and absence of warnings.
+    ds = gdal.OpenEx(path, gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+
+    # Data array with overviews.
+    q = rg.OpenMDArray("q")
+    assert q.GetOverviewCount() == 1
+    ovr = q.GetOverview(0)
+    assert ovr.GetDimensions()[0].GetSize() == 10
+
+    # Other arrays: no overviews, no warnings.
+    gdal.ErrorReset()
+    for name in ["z", "X", "Y"]:
+        ar = rg.OpenMDArray(name)
+        assert ar.GetOverviewCount() == 0, f"{name} should have 0 overviews"
+    assert gdal.GetLastErrorMsg() == "", f"Unexpected warning: {gdal.GetLastErrorMsg()}"

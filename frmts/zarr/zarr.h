@@ -673,6 +673,8 @@ class ZarrV3Group final : public ZarrGroupBase
                                          const std::string &osZarrayFilename,
                                          const CPLJSONObject &oRoot) const;
 
+    void GenerateMultiscalesMetadata(const char *pszResampling = nullptr);
+
     std::shared_ptr<GDALMDArray> CreateMDArray(
         const std::string &osName,
         const std::vector<std::shared_ptr<GDALDimension>> &aoDimensions,
@@ -1404,6 +1406,8 @@ class ZarrV3Array final : public ZarrArray
 
     void LoadOverviews() const;
 
+    void ReconstructCreationOptionsFromCodecs();
+
   public:
     ~ZarrV3Array() override;
 
@@ -1435,6 +1439,11 @@ class ZarrV3Array final : public ZarrArray
     int GetOverviewCount() const override;
 
     std::shared_ptr<GDALMDArray> GetOverview(int idx) const override;
+
+    CPLErr BuildOverviews(const char *pszResampling, int nOverviews,
+                          const int *panOverviewList,
+                          GDALProgressFunc pfnProgress, void *pProgressData,
+                          CSLConstList papszOptions) override;
 
   protected:
     std::string GetDataDirectory() const override;
