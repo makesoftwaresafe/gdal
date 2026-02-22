@@ -7128,6 +7128,31 @@ def test_zarr_read_simple_multiscales(filename):
 
 
 ###############################################################################
+# Test reading multiscales with a root-level array (GetParentGroup nPos==0)
+
+
+@gdaltest.enable_exceptions()
+def test_zarr_read_root_level_multiscales():
+
+    filename = "data/zarr/v3/root_level_multiscales/zarr.json"
+
+    # MDArray API: root-level array should discover overviews
+    with gdal.OpenEx(filename, gdal.OF_MULTIDIM_RASTER) as ds:
+        rg = ds.GetRootGroup()
+        ar = rg.OpenMDArray("ar")
+        assert ar.GetOverviewCount() == 1
+        assert ar.GetOverview(0).GetFullName() == "/ovr_2x/ar"
+
+    # Classic API via ZARR: URI
+    store = filename.replace("/zarr.json", "")
+    with gdal.Open(f'ZARR:"{store}":/ar') as ds:
+        band = ds.GetRasterBand(1)
+        assert band.GetOverviewCount() == 1
+        assert band.GetOverview(0).YSize == 100
+        assert band.GetOverview(0).XSize == 50
+
+
+###############################################################################
 # Test reading a dataset with errors in the "multiscales" convention
 
 
