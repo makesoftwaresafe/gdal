@@ -485,7 +485,8 @@ GDALDataset *ZarrDataset::Open(GDALOpenInfo *poOpenInfo)
                 for (const auto &osArrayName : aosArrays)
                 {
                     auto poArray = poRG->OpenMDArrayFromFullname(osArrayName);
-                    if (poArray && poArray->GetDimensionCount() >= 2)
+                    if (poArray && poArray->GetDimensionCount() >= 2 &&
+                        osArrayName.find("/ovr_") == std::string::npos)
                     {
                         if (osMainArray.empty())
                         {
@@ -584,7 +585,8 @@ GDALDataset *ZarrDataset::Open(GDALOpenInfo *poOpenInfo)
             for (size_t i = 0; i < aosArrays.size(); ++i)
             {
                 auto poArray = poRG->OpenMDArrayFromFullname(aosArrays[i]);
-                if (poArray)
+                if (poArray && (bListAllArrays || aosArrays[i].find("/ovr_") ==
+                                                      std::string::npos))
                 {
                     bool bAddSubDS = false;
                     if (bListAllArrays)

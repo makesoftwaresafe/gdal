@@ -8579,11 +8579,12 @@ def test_zarr_build_overviews_classic_bridge(tmp_vsimem):
     # Verify overviews are visible when reopening via the ZARR subdataset
     # syntax, which is the typical access pattern for /vsis3/.
     # Regression test for GetParentGroup() not resolving root-level arrays.
-    ds = gdal.OpenEx(f'ZARR:"{path}":/data', gdal.OF_RASTER)
+    ds = gdal.Open(path)
     band = ds.GetRasterBand(1)
     assert band.GetOverviewCount() == 1
     ovr_band = band.GetOverview(0)
     assert ovr_band.XSize == 32 and ovr_band.YSize == 32
+    assert len(ds.GetSubDatasets()) == 1
 
 
 ###############################################################################
