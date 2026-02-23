@@ -508,13 +508,15 @@ static std::pair<double, double> GetMinMaxLatWithOverlap(int nZone,
 /*                         GetPolarFrameCount()                         */
 /************************************************************************/
 
+constexpr double EPSILON_1Em3 = 1e-3;
+
 static int GetPolarFrameCount(int nReciprocalScale)
 {
     const double numberSubFrames = std::round(
         GetPolarConstant(nReciprocalScale) * 20.0 / 360.0 / BLOCK_SIZE);
     constexpr int SUBFRAMES_PER_FRAME = CADRG_FRAME_PIXEL_COUNT / BLOCK_SIZE;
-    int numberFrames =
-        static_cast<int>(std::round(numberSubFrames / SUBFRAMES_PER_FRAME));
+    int numberFrames = static_cast<int>(
+        std::ceil(numberSubFrames / SUBFRAMES_PER_FRAME - EPSILON_1Em3));
     if ((numberFrames % 2) == 0)
         ++numberFrames;
     return numberFrames;
@@ -524,7 +526,6 @@ static int GetPolarFrameCount(int nReciprocalScale)
 /*                        GetFrameCountAlongX()                         */
 /************************************************************************/
 
-constexpr double EPSILON_1Em3 = 1e-3;
 constexpr double dfMinLonZone = -180.0;
 constexpr double dfMaxLonZone = 180.0;
 
