@@ -707,21 +707,22 @@ CPLErr GDALWMSRasterBand::ReadBlockFromDataset(GDALDataset *ds, int x, int y,
     // %d)", to_buffer_band, x, y);
 
     /* expected size */
-    const int esx = std::clamp((x + 1) * nBlockXSize, 0, nRasterXSize) -
-                    std::clamp(x * nBlockXSize, 0, nRasterXSize);
-    const int esy = std::clamp((y + 1) * nBlockYSize, 0, nRasterYSize) -
-                    std::clamp(y * nBlockYSize, 0, nRasterYSize);
+    const int expected_sx = std::clamp((x + 1) * nBlockXSize, 0, nRasterXSize) -
+                            std::clamp(x * nBlockXSize, 0, nRasterXSize);
+    const int expected_sy = std::clamp((y + 1) * nBlockYSize, 0, nRasterYSize) -
+                            std::clamp(y * nBlockYSize, 0, nRasterYSize);
 
     int sx = ds->GetRasterXSize();
     int sy = ds->GetRasterYSize();
     /* Allow bigger than expected so pre-tiled constant size images work on
      * corners */
-    if ((sx > nBlockXSize) || (sy > nBlockYSize) || (sx < esx) || (sy < esy))
+    if ((sx > nBlockXSize) || (sy > nBlockYSize) || (sx < expected_sx) ||
+        (sy < expected_sy))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "GDALWMS: Incorrect size %d x %d of downloaded block, "
                  "expected %d x %d, max %d x %d.",
-                 sx, sy, esx, esy, nBlockXSize, nBlockYSize);
+                 sx, sy, expected_sx, expected_sy, nBlockXSize, nBlockYSize);
         ret = CE_Failure;
     }
 
