@@ -3133,134 +3133,148 @@ def test_zarr_create_array_set_dimension_name(tmp_vsimem):
     ],
 )
 @pytest.mark.parametrize("use_optimized_code_paths", [True, False])
+@pytest.mark.parametrize("GDAL_NUM_THREADS", ["1", "ALL_CPUS"])
 def test_zarr_write_array_content(
-    tmp_vsimem, dtype, gdaltype, fill_value, nodata_value, use_optimized_code_paths
+    tmp_vsimem,
+    dtype,
+    gdaltype,
+    fill_value,
+    nodata_value,
+    use_optimized_code_paths,
+    GDAL_NUM_THREADS,
 ):
+    with gdal.config_option("GDAL_NUM_THREADS", GDAL_NUM_THREADS):
 
-    structtype = _gdal_data_type_to_array_type[gdaltype]
+        structtype = _gdal_data_type_to_array_type[gdaltype]
 
-    j = {
-        "chunks": [2, 3],
-        "compressor": None,
-        "dtype": dtype,
-        "fill_value": fill_value,
-        "filters": None,
-        "order": "C",
-        "shape": [5, 4],
-        "zarr_format": 2,
-    }
+        j = {
+            "chunks": [2, 3],
+            "compressor": None,
+            "dtype": dtype,
+            "fill_value": fill_value,
+            "filters": None,
+            "order": "C",
+            "shape": [5, 4],
+            "zarr_format": 2,
+        }
 
-    filename = (
-        f"{tmp_vsimem}/test"
-        + dtype.replace("<", "lt").replace(">", "gt").replace("!", "not")
-        + structtype
-        + ".zarr"
-    )
-    gdal.Mkdir(filename, 0o755)
-    f = gdal.VSIFOpenL(filename + "/.zarray", "wb")
-    assert f
-    data = json.dumps(j)
-    gdal.VSIFWriteL(data, 1, len(data), f)
-    gdal.VSIFCloseL(f)
-
-    if gdaltype not in (gdal.GDT_CFloat16, gdal.GDT_CFloat32, gdal.GDT_CFloat64):
-        tile_0_0_data = struct.pack(dtype[0] + (structtype * 6), 1, 2, 3, 5, 6, 7)
-        tile_0_1_data = struct.pack(dtype[0] + (structtype * 6), 4, 0, 0, 8, 0, 0)
-    else:
-        tile_0_0_data = struct.pack(
-            dtype[0] + (structtype * 12), 1, 11, 2, 0, 3, 0, 5, 0, 6, 0, 7, 0
+        filename = (
+            f"{tmp_vsimem}/test"
+            + dtype.replace("<", "lt").replace(">", "gt").replace("!", "not")
+            + structtype
+            + ".zarr"
         )
-        tile_0_1_data = struct.pack(
-            dtype[0] + (structtype * 12), 4, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0
+        gdal.Mkdir(filename, 0o755)
+        f = gdal.VSIFOpenL(filename + "/.zarray", "wb")
+        assert f
+        data = json.dumps(j)
+        gdal.VSIFWriteL(data, 1, len(data), f)
+        gdal.VSIFCloseL(f)
+
+        if gdaltype not in (gdal.GDT_CFloat16, gdal.GDT_CFloat32, gdal.GDT_CFloat64):
+            tile_0_0_data = struct.pack(dtype[0] + (structtype * 6), 1, 2, 3, 5, 6, 7)
+            tile_0_1_data = struct.pack(dtype[0] + (structtype * 6), 4, 0, 0, 8, 0, 0)
+        else:
+            tile_0_0_data = struct.pack(
+                dtype[0] + (structtype * 12), 1, 11, 2, 0, 3, 0, 5, 0, 6, 0, 7, 0
+            )
+            tile_0_1_data = struct.pack(
+                dtype[0] + (structtype * 12), 4, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0
+            )
+        gdal.FileFromMemBuffer(filename + "/0.0", tile_0_0_data)
+        gdal.FileFromMemBuffer(filename + "/0.1", tile_0_1_data)
+
+        with gdaltest.config_option(
+            "GDAL_ZARR_USE_OPTIMIZED_CODE_PATHS",
+            "YES" if use_optimized_code_paths else "NO",
+        ):
+            ds = gdal.OpenEx(filename, gdal.OF_MULTIDIM_RASTER | gdal.OF_UPDATE)
+            assert ds
+            rg = ds.GetRootGroup()
+            assert rg
+            ar = rg.OpenMDArray(rg.GetMDArrayNames()[0])
+        assert ar
+
+        dt = gdal.ExtendedDataType.Create(
+            gdal.GDT_CFloat64
+            if gdaltype in (gdal.GDT_CFloat32, gdal.GDT_CFloat64)
+            else gdal.GDT_Float64
         )
-    gdal.FileFromMemBuffer(filename + "/0.0", tile_0_0_data)
-    gdal.FileFromMemBuffer(filename + "/0.1", tile_0_1_data)
 
-    with gdaltest.config_option(
-        "GDAL_ZARR_USE_OPTIMIZED_CODE_PATHS",
-        "YES" if use_optimized_code_paths else "NO",
-    ):
-        ds = gdal.OpenEx(filename, gdal.OF_MULTIDIM_RASTER | gdal.OF_UPDATE)
-        assert ds
-        rg = ds.GetRootGroup()
-        assert rg
-        ar = rg.OpenMDArray(rg.GetMDArrayNames()[0])
-    assert ar
-
-    dt = gdal.ExtendedDataType.Create(
-        gdal.GDT_CFloat64
-        if gdaltype in (gdal.GDT_CFloat32, gdal.GDT_CFloat64)
-        else gdal.GDT_Float64
-    )
-
-    # Write all nodataset. That should cause tiles to be removed.
-    nv = nodata_value if nodata_value else 0
-    buf_nodata = array.array(
-        "d",
-        [nv]
-        * (
-            5
-            * 4
+        # Write all nodataset. That should cause tiles to be removed.
+        nv = nodata_value if nodata_value else 0
+        buf_nodata = array.array(
+            "d",
+            [nv]
             * (
-                2
-                if gdaltype in (gdal.GDT_CFloat16, gdal.GDT_CFloat32, gdal.GDT_CFloat64)
-                else 1
-            )
-        ),
-    )
-    assert ar.Write(buf_nodata, buffer_datatype=dt) == gdal.CE_None
-    assert ar.Read(buffer_datatype=dt) == bytearray(buf_nodata)
+                5
+                * 4
+                * (
+                    2
+                    if gdaltype
+                    in (gdal.GDT_CFloat16, gdal.GDT_CFloat32, gdal.GDT_CFloat64)
+                    else 1
+                )
+            ),
+        )
+        assert ar.Write(buf_nodata, buffer_datatype=dt) == gdal.CE_None
+        assert ar.Read(buffer_datatype=dt) == bytearray(buf_nodata)
 
-    if fill_value is None or fill_value == 0 or not gdal.DataTypeIsComplex(gdaltype):
-        assert gdal.VSIStatL(filename + "/0.0") is None
+        if (
+            fill_value is None
+            or fill_value == 0
+            or not gdal.DataTypeIsComplex(gdaltype)
+        ):
+            assert gdal.VSIStatL(filename + "/0.0") is None
 
-    # Write all ones
-    ones = array.array(
-        "d",
-        [0]
-        * (
-            5
-            * 4
+        # Write all ones
+        ones = array.array(
+            "d",
+            [0]
             * (
-                2
-                if gdaltype in (gdal.GDT_CFloat16, gdal.GDT_CFloat32, gdal.GDT_CFloat64)
-                else 1
-            )
-        ),
-    )
-    assert ar.Write(ones, buffer_datatype=dt) == gdal.CE_None
-    assert ar.Read(buffer_datatype=dt) == bytearray(ones)
+                5
+                * 4
+                * (
+                    2
+                    if gdaltype
+                    in (gdal.GDT_CFloat16, gdal.GDT_CFloat32, gdal.GDT_CFloat64)
+                    else 1
+                )
+            ),
+        )
+        assert ar.Write(ones, buffer_datatype=dt) == gdal.CE_None
+        assert ar.Read(buffer_datatype=dt) == bytearray(ones)
 
-    # Write with odd array_step
-    assert (
-        ar.Write(
-            struct.pack("d" * 4, nv, nv, 6, 5),
+        # Write with odd array_step
+        assert (
+            ar.Write(
+                struct.pack("d" * 4, nv, nv, 6, 5),
+                array_start_idx=[2, 1],
+                count=[2, 2],
+                array_step=[-1, -1],
+                buffer_datatype=gdal.ExtendedDataType.Create(gdal.GDT_Float64),
+            )
+            == gdal.CE_None
+        )
+
+        # Check back
+        assert ar.Read(
             array_start_idx=[2, 1],
             count=[2, 2],
             array_step=[-1, -1],
             buffer_datatype=gdal.ExtendedDataType.Create(gdal.GDT_Float64),
-        )
-        == gdal.CE_None
-    )
+        ) == struct.pack("d" * 4, nv, nv, 6, 5)
 
-    # Check back
-    assert ar.Read(
-        array_start_idx=[2, 1],
-        count=[2, 2],
-        array_step=[-1, -1],
-        buffer_datatype=gdal.ExtendedDataType.Create(gdal.GDT_Float64),
-    ) == struct.pack("d" * 4, nv, nv, 6, 5)
+        # Force dirty block eviction
+        ar.Read(buffer_datatype=dt)
 
-    # Force dirty block eviction
-    ar.Read(buffer_datatype=dt)
-
-    # Check back again
-    assert ar.Read(
-        array_start_idx=[2, 1],
-        count=[2, 2],
-        array_step=[-1, -1],
-        buffer_datatype=gdal.ExtendedDataType.Create(gdal.GDT_Float64),
-    ) == struct.pack("d" * 4, nv, nv, 6, 5)
+        # Check back again
+        assert ar.Read(
+            array_start_idx=[2, 1],
+            count=[2, 2],
+            array_step=[-1, -1],
+            buffer_datatype=gdal.ExtendedDataType.Create(gdal.GDT_Float64),
+        ) == struct.pack("d" * 4, nv, nv, 6, 5)
 
 
 @pytest.mark.parametrize(
@@ -3998,122 +4012,126 @@ def test_zarr_read_nczarr_v2(filename, path):
 
 @pytest.mark.parametrize("format", ["ZARR_V2", "ZARR_V3"])
 @pytest.mark.require_driver("netCDF")
-def test_zarr_cache_tile_presence(tmp_path, format):
+@pytest.mark.parametrize("GDAL_NUM_THREADS", ["1", "ALL_CPUS"])
+def test_zarr_cache_tile_presence(tmp_path, format, GDAL_NUM_THREADS):
 
-    filename = str(tmp_path / "test.zarr")
+    with gdal.config_option("GDAL_NUM_THREADS", GDAL_NUM_THREADS):
+        filename = str(tmp_path / "test.zarr")
 
-    # Create a Zarr array with sparse tiles
-    def create():
-        ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
-            filename, options=["FORMAT=" + format]
-        )
-        assert ds is not None
-        rg = ds.GetRootGroup()
-        assert rg
+        # Create a Zarr array with sparse tiles
+        def create():
+            ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+                filename, options=["FORMAT=" + format]
+            )
+            assert ds is not None
+            rg = ds.GetRootGroup()
+            assert rg
 
-        dim0 = rg.CreateDimension("dim0", None, None, 2)
-        dim1 = rg.CreateDimension("dim1", None, None, 5)
-        ar = rg.CreateMDArray(
-            "test",
-            [dim0, dim1],
-            gdal.ExtendedDataType.Create(gdal.GDT_UInt8),
-            ["BLOCKSIZE=1,2"],
-        )
-        assert ar
-        assert (
-            ar.Write(struct.pack("B" * 1, 10), array_start_idx=[0, 0], count=[1, 1])
-            == gdal.CE_None
-        )
-        assert (
-            ar.Write(struct.pack("B" * 1, 100), array_start_idx=[1, 3], count=[1, 1])
-            == gdal.CE_None
-        )
+            dim0 = rg.CreateDimension("dim0", None, None, 2)
+            dim1 = rg.CreateDimension("dim1", None, None, 5)
+            ar = rg.CreateMDArray(
+                "test",
+                [dim0, dim1],
+                gdal.ExtendedDataType.Create(gdal.GDT_UInt8),
+                ["BLOCKSIZE=1,2"],
+            )
+            assert ar
+            assert (
+                ar.Write(struct.pack("B" * 1, 10), array_start_idx=[0, 0], count=[1, 1])
+                == gdal.CE_None
+            )
+            assert (
+                ar.Write(
+                    struct.pack("B" * 1, 100), array_start_idx=[1, 3], count=[1, 1]
+                )
+                == gdal.CE_None
+            )
 
-    create()
+        create()
 
-    # Create the tile presence cache
-    def open_with_cache_tile_presence_option():
-        ds = gdal.OpenEx(
-            filename,
-            gdal.OF_MULTIDIM_RASTER,
-            open_options=["CACHE_TILE_PRESENCE=YES"],
-        )
-        assert ds is not None
-        rg = ds.GetRootGroup()
-        assert rg.OpenMDArray("test") is not None
+        # Create the tile presence cache
+        def open_with_cache_tile_presence_option():
+            ds = gdal.OpenEx(
+                filename,
+                gdal.OF_MULTIDIM_RASTER,
+                open_options=["CACHE_TILE_PRESENCE=YES"],
+            )
+            assert ds is not None
+            rg = ds.GetRootGroup()
+            assert rg.OpenMDArray("test") is not None
 
-    open_with_cache_tile_presence_option()
+        open_with_cache_tile_presence_option()
 
-    # Check that the cache exists
-    if format == "ZARR_V2":
-        cache_filename = filename + "/test/.zarray.gmac"
-    else:
-        cache_filename = filename + "/test/zarr.json.gmac"
-    assert gdal.VSIStatL(cache_filename) is not None
+        # Check that the cache exists
+        if format == "ZARR_V2":
+            cache_filename = filename + "/test/.zarray.gmac"
+        else:
+            cache_filename = filename + "/test/zarr.json.gmac"
+        assert gdal.VSIStatL(cache_filename) is not None
 
-    # Read content of the array
-    def read_content():
-        ds = gdal.OpenEx(filename, gdal.OF_MULTIDIM_RASTER)
-        assert ds is not None
-        rg = ds.GetRootGroup()
-        ar = rg.OpenMDArray("test")
-        assert ar is not None
-        assert struct.unpack("B" * 2 * 5, ar.Read()) == (
-            10,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            100,
-            0,
-        )
+        # Read content of the array
+        def read_content():
+            ds = gdal.OpenEx(filename, gdal.OF_MULTIDIM_RASTER)
+            assert ds is not None
+            rg = ds.GetRootGroup()
+            ar = rg.OpenMDArray("test")
+            assert ar is not None
+            assert struct.unpack("B" * 2 * 5, ar.Read()) == (
+                10,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                100,
+                0,
+            )
 
-    read_content()
+        read_content()
 
-    # again
-    open_with_cache_tile_presence_option()
+        # again
+        open_with_cache_tile_presence_option()
 
-    read_content()
+        read_content()
 
-    # Now alter the cache to mark a present tile as missing
-    def alter_cache():
-        ds = gdal.OpenEx(cache_filename, gdal.OF_MULTIDIM_RASTER | gdal.OF_UPDATE)
-        assert ds is not None
-        rg = ds.GetRootGroup()
-        assert rg.GetMDArrayNames() == ["_test_tile_presence"]
-        ar = rg.OpenMDArray("_test_tile_presence")
-        assert struct.unpack("B" * 2 * 3, ar.Read()) == (1, 0, 0, 0, 1, 0)
-        assert (
-            ar.Write(struct.pack("B" * 1, 0), array_start_idx=[1, 1], count=[1, 1])
-            == gdal.CE_None
-        )
+        # Now alter the cache to mark a present tile as missing
+        def alter_cache():
+            ds = gdal.OpenEx(cache_filename, gdal.OF_MULTIDIM_RASTER | gdal.OF_UPDATE)
+            assert ds is not None
+            rg = ds.GetRootGroup()
+            assert rg.GetMDArrayNames() == ["_test_tile_presence"]
+            ar = rg.OpenMDArray("_test_tile_presence")
+            assert struct.unpack("B" * 2 * 3, ar.Read()) == (1, 0, 0, 0, 1, 0)
+            assert (
+                ar.Write(struct.pack("B" * 1, 0), array_start_idx=[1, 1], count=[1, 1])
+                == gdal.CE_None
+            )
 
-    alter_cache()
+        alter_cache()
 
-    # Check that reading the array reflects the above modification
-    def read_content_altered():
-        ds = gdal.OpenEx(filename, gdal.OF_MULTIDIM_RASTER)
-        assert ds is not None
-        rg = ds.GetRootGroup()
-        ar = rg.OpenMDArray("test")
-        assert ar is not None
-        assert struct.unpack("B" * 2 * 5, ar.Read()) == (
-            10,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        )
+        # Check that reading the array reflects the above modification
+        def read_content_altered():
+            ds = gdal.OpenEx(filename, gdal.OF_MULTIDIM_RASTER)
+            assert ds is not None
+            rg = ds.GetRootGroup()
+            ar = rg.OpenMDArray("test")
+            assert ar is not None
+            assert struct.unpack("B" * 2 * 5, ar.Read()) == (
+                10,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            )
 
-    read_content_altered()
+        read_content_altered()
 
 
 @pytest.mark.parametrize("compression", ["NONE", "GZIP"])
