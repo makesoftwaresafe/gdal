@@ -953,6 +953,9 @@ bool ZarrArray::IAdviseReadCommon(const GUInt64 *arrayStartIdx,
     if (!CheckValidAndErrorOutIfNot())
         return false;
 
+    if (!FlushDirtyBlock())
+        return false;
+
     const size_t nDims = m_aoDims.size();
     anIndicesCur.resize(nDims);
     std::vector<uint64_t> anIndicesMin(nDims);
@@ -1022,6 +1025,16 @@ bool ZarrArray::IAdviseReadCommon(const GUInt64 *arrayStartIdx,
                                     /* bDefaultAllCPUs=*/true);
     if (nThreadsMax <= 1)
         return true;
+
+    // libhdf5 doesn't like concurrent access to the same file, even under
+    // a mutex...
+    auto poBlockPresenceArray = OpenBlockPresenceCache(false);
+    if (poBlockPresenceArray)
+    {
+        nThreadsMax = 1;
+        return true;
+    }
+
     CPLDebug(ZARR_DEBUG_KEY, "IAdviseRead(): Using up to %d threads",
              nThreadsMax);
 
