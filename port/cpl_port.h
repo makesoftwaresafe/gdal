@@ -357,23 +357,24 @@ typedef uintptr_t GUIntptr_t;
 #endif
 /*! @endcond*/
 
-#ifndef MAX
 /** Macro to compute the minimum of 2 values */
-#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define CPL_MIN(a, b) (((a) < (b)) ? (a) : (b))
 /** Macro to compute the maximum of 2 values */
-#define MAX(a, b) (((a) > (b)) ? (a) : (b))
-#endif
+#define CPL_MAX(a, b) (((a) > (b)) ? (a) : (b))
 
-#ifndef ABS
 /** Macro to compute the absolute value */
-#define ABS(x) (((x) < 0) ? (-1 * (x)) : (x))
-#endif
+#define CPL_ABS(x) (((x) < 0) ? (-1 * (x)) : (x))
 
+/*! @cond Doxygen_Suppress */
+
+#if defined(GDAL_COMPILATION)
 #ifndef M_PI
-/** PI definition */
 #define M_PI 3.14159265358979323846
 /* 3.1415926535897932384626433832795 */
 #endif
+
+#endif
+/*! @endcond*/
 
 /* -------------------------------------------------------------------- */
 /*      Macro to test equality of two floating point values.            */

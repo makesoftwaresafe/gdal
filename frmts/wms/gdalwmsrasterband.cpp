@@ -707,10 +707,10 @@ CPLErr GDALWMSRasterBand::ReadBlockFromDataset(GDALDataset *ds, int x, int y,
     // %d)", to_buffer_band, x, y);
 
     /* expected size */
-    const int esx = MIN(MAX(0, (x + 1) * nBlockXSize), nRasterXSize) -
-                    MIN(MAX(0, x * nBlockXSize), nRasterXSize);
-    const int esy = MIN(MAX(0, (y + 1) * nBlockYSize), nRasterYSize) -
-                    MIN(MAX(0, y * nBlockYSize), nRasterYSize);
+    const int esx = std::clamp((x + 1) * nBlockXSize, 0, nRasterXSize) -
+                    std::clamp(x * nBlockXSize, 0, nRasterXSize);
+    const int esy = std::clamp((y + 1) * nBlockYSize, 0, nRasterYSize) -
+                    std::clamp(y * nBlockYSize, 0, nRasterYSize);
 
     int sx = ds->GetRasterXSize();
     int sy = ds->GetRasterYSize();
@@ -743,7 +743,7 @@ CPLErr GDALWMSRasterBand::ReadBlockFromDataset(GDALDataset *ds, int x, int y,
                         {
                             color_table = new GByte[256 * 4];
                             const int count =
-                                MIN(256, ct->GetColorEntryCount());
+                                std::min(256, ct->GetColorEntryCount());
                             for (i = 0; i < count; ++i)
                             {
                                 GDALColorEntry ce;
