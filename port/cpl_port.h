@@ -135,22 +135,12 @@ extern "C++"
 /*      modified for new platforms.                                     */
 /* ==================================================================== */
 
-/* -------------------------------------------------------------------- */
-/*      Which versions of C++ are available.                            */
-/* -------------------------------------------------------------------- */
-
 /* MSVC fails to define a decent value of __cplusplus. Try to target VS2015*/
 /* as a minimum */
 
 #if defined(__cplusplus) && !defined(CPL_SUPRESS_CPLUSPLUS)
 #if !(__cplusplus >= 201103L || (defined(_MSC_VER) && _MSC_VER >= 1900))
 #error Must have C++11 or newer.
-#endif
-#if __cplusplus >= 201402L || (defined(_MSVC_LANG) && _MSVC_LANG >= 201402L)
-#define HAVE_CXX14 1
-#endif
-#if __cplusplus >= 201703L || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
-#define HAVE_CXX17 1
 #endif
 #endif /* __cplusplus */
 
