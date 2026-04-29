@@ -940,8 +940,7 @@ CPLErr MRFRasterBand::FetchClonedBlock(int xblk, int yblk, void *buffer)
         // One last check, blocksize and type matches
         int bsx, bsy;
         b->GetBlockSize(&bsx, &bsy);
-        if (bsx != img.pagesize.x ||
-            bsy != img.pagesize.y ||
+        if (bsx != img.pagesize.x || bsy != img.pagesize.y ||
             b->GetRasterDataType() != eDataType)
         {
             return CE_Failure;
