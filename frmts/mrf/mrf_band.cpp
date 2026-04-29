@@ -912,29 +912,40 @@ CPLErr MRFRasterBand::FetchClonedBlock(int xblk, int yblk, void *buffer)
         return CE_Failure;
     }
 
-    // Check the datatype and structure of the bands
-    // This is a sanity check, the source is lazy opened
-    if (poSrc->GetRasterBand(1)->GetRasterDataType() != eDataType ||
-        poSrc->GetRasterCount() != poMRFDS->nBands ||
-        poSrc->GetRasterXSize() != poMRFDS->full.size.x ||
-        poSrc->GetRasterYSize() != poMRFDS->full.size.y)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "MRF: Cloned source %s doesn't have the same structure",
-                 poMRFDS->source.c_str());
-        return CE_Failure;
-    }
-
     if (poMRFDS->bypass_cache || GF_Read == DataMode())
     {
         // Can't store, so just fetch from source, which is an MRF with
         // identical structure
         MRFRasterBand *b =
-            static_cast<MRFRasterBand *>(poSrc->GetRasterBand(nBand));
+            reinterpret_cast<MRFRasterBand *>(poSrc->GetRasterBand(nBand));
+
+        // Check the datatype and structure of the bands
+        // This is a sanity check, the source is lazy opened
+        if (b == nullptr || poSrc->GetRasterCount() != poMRFDS->nBands ||
+            poSrc->GetRasterXSize() != poMRFDS->full.size.x ||
+            poSrc->GetRasterYSize() != poMRFDS->full.size.y)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "MRF: Cloned source %s doesn't have the same structure",
+                     poMRFDS->source.c_str());
+            return CE_Failure;
+        }
+
+        // Switch to overview if needed
         if (b->GetOverviewCount() && m_l)
             b = static_cast<MRFRasterBand *>(b->GetOverview(m_l - 1));
         if (b == nullptr)
             return CE_Failure;
+
+        // One last check, blocksize and organization matches
+        int bsx, bsy;
+        b->GetBlockSize(&bsx, &bsy);
+        if (bsx != img.pagesize.x || bsy != img.pagesize.y ||
+            b->GetRasterDataType() != eDataType)
+        {
+            return CE_Failure;
+        }
+
         return b->IReadBlock(xblk, yblk, buffer);
     }
 
