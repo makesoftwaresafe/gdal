@@ -898,7 +898,29 @@ CPLErr MRFRasterBand::FetchClonedBlock(int xblk, int yblk, void *buffer)
     MRFDataset *poSrc = static_cast<MRFDataset *>(poMRFDS->GetSrcDS());
     if (nullptr == poSrc)
     {
-        CPLError(CE_Failure, CPLE_AppDefined, "MRF: Can't open source file %s",
+        CPLError(CE_Failure, CPLE_AppDefined, "MRF: Can't open source %s",
+                 poMRFDS->source.c_str());
+        return CE_Failure;
+    }
+    // Check that the source is an MRF
+    auto srcDriver = poSrc->GetDriver();
+    if (srcDriver == nullptr || !EQUAL(srcDriver->GetDescription(), "MRF"))
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "MRF: Cloned source %s is not an MRF",
+                 poMRFDS->source.c_str());
+        return CE_Failure;
+    }
+
+    // Check the datatype and structure of the bands
+    // This is a sanity check, the source is lazy opened
+    if (poSrc->GetRasterBand(1)->GetRasterDataType() != eDataType ||
+        poSrc->GetRasterCount() != poMRFDS->nBands ||
+        poSrc->GetRasterXSize() != poMRFDS->full.size.x ||
+        poSrc->GetRasterYSize() != poMRFDS->full.size.y)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "MRF: Cloned source %s doesn't have the same structure",
                  poMRFDS->source.c_str());
         return CE_Failure;
     }
