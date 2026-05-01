@@ -441,7 +441,14 @@ GDALPDFObject *GDALPDFDictionary::LookupObject(const char *pszPath)
             }
             auto poArray = poCurObj->GetArray();
             assert(poArray);
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
             poCurObj = poArray->Get(iElt);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
         }
     }
     return poCurObj;
